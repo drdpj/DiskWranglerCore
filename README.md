@@ -35,7 +35,7 @@ Headers are included as `<diskwrangler/ui/licences.h>`; everything is in `diskwr
 |---|---|
 | `diskwrangler/app/` | settings (`appsettings.h`), files opened from the Finder (`fileopen.h`) |
 | `diskwrangler/ui/` | the button bar, the licences viewer |
-| `ci/` | the build, licence-collecting, `.deb` and Windows installer scripts the programs' workflows run as `core/ci/...` |
+| `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...` |
 | `docs/` | building and releasing; the retro-files drag format |
 | `tests/` | `settingstest` (`cmake -S . -B build && cmake --build build && ctest --test-dir build`, or qmake `tests/settingstest.pro`) |
 
