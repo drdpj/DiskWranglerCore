@@ -1,0 +1,46 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 760 656' width='760' height='656' role='img' aria-label='Each Wrangler app is a set of plug-ins on one shared core' font-family='-apple-system,Segoe UI,Helvetica,Arial,sans-serif' font-size='13'>
+<defs><marker id='layers-arrow' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#6b7280'/></marker></defs>
+<rect width='760' height='656' fill='#ffffff'/>
+<text x='24' y='30' font-weight='600' font-size='15' fill='#111827'>Each Wrangler app is a set of plug-ins on one shared core</text>
+<text x='24' y='50' font-size='11.5' fill='#4b5563'>Each core layer uses only the layers below it; the filesystem interface is the contract</text>
+<rect x='24' y='72' width='224' height='72' rx='8' fill='none' stroke='#6b7280' stroke-width='1.25'/>
+<text x='136.0' y='96' font-weight='600' text-anchor='middle' fill='#111827'>Acorn Disk Wrangler</text>
+<text x='136.0' y='116' font-size='11.5' text-anchor='middle' fill='#4b5563'>ADFS plug-in; DFS, FAT modules</text>
+<text x='136.0' y='132' font-size='11.5' text-anchor='middle' fill='#4b5563'>BBC BASIC viewer</text>
+<rect x='268' y='72' width='224' height='72' rx='8' fill='none' stroke='#6b7280' stroke-width='1.25'/>
+<text x='380.0' y='96' font-weight='600' text-anchor='middle' fill='#111827'>CP/M Disk Wrangler</text>
+<text x='380.0' y='116' font-size='11.5' text-anchor='middle' fill='#4b5563'>CP/M, Torch plug-ins, diskdefs</text>
+<text x='380.0' y='132' font-size='11.5' text-anchor='middle' fill='#4b5563'>CP/M text and WordStar viewer</text>
+<rect x='512' y='72' width='224' height='72' rx='8' fill='none' stroke='#6b7280' stroke-width='1.25' stroke-dasharray='5 4'/>
+<text x='624.0' y='96' font-weight='600' text-anchor='middle' fill='#111827'>FLEX Disk Wrangler</text>
+<text x='624.0' y='116' font-size='11.5' text-anchor='middle' fill='#4b5563'>FLEX plug-in (future)</text>
+<text x='624.0' y='132' font-size='11.5' text-anchor='middle' fill='#4b5563'>space-expanding text viewer</text>
+<g fill='none' stroke='#6b7280' stroke-width='1.25'>
+<path d='M136.0 144V192' marker-end='url(#layers-arrow)'/>
+<path d='M380.0 144V192' marker-end='url(#layers-arrow)'/>
+<path d='M624.0 144V192' marker-end='url(#layers-arrow)' stroke-dasharray='5 4'/>
+<path d='M380 568V592' marker-end='url(#layers-arrow)'/></g>
+<text x='390.0' y='172' font-size='11.5' fill='#4b5563'>register factories, viewers, presets</text>
+<rect x='24' y='192' width='712' height='376' rx='8' fill='none' stroke='#6b7280' stroke-width='1.25'/>
+<text x='40' y='214' font-weight='600' fill='#111827'>DiskWranglerCore (git submodule, pinned to a tag)</text>
+<rect x='40' y='224' width='680' height='56' rx='8' fill='none' fill-opacity='1' stroke='#6b7280' stroke-width='1.25'/>
+<text x='56' y='248' font-weight='600' fill='#111827'>wapp</text>
+<text x='56' y='264' font-size='11.5' fill='#4b5563'>runApp(AppInfo), icons, settings, CI and installer templates</text>
+<rect x='40' y='292' width='452' height='56' rx='8' fill='none' fill-opacity='1' stroke='#6b7280' stroke-width='1.25'/>
+<text x='56' y='316' font-weight='600' fill='#111827'>wui</text>
+<text x='56' y='332' font-size='11.5' fill='#4b5563'>Main window, VolumePanes, schema-built Properties, viewer</text>
+<rect x='508' y='292' width='212' height='56' rx='8' fill='none' fill-opacity='1' stroke='#6b7280' stroke-width='1.25'/>
+<text x='524' y='316' font-weight='600' fill='#111827'>wcli</text>
+<text x='524' y='332' font-size='11.5' fill='#4b5563'>Console tools, --json, scripts</text>
+<rect x='40' y='360' width='680' height='56' rx='8' fill='#2563eb' fill-opacity='0.12' stroke='#2563eb' stroke-width='2'/>
+<text x='56' y='384' font-weight='600' fill='#111827'>wcore: fs, detect, xfer, text</text>
+<text x='56' y='400' font-size='11.5' fill='#4b5563'>Volume, Disc, AttrSpec; probe registry with tiers; retro-files, HostPolicy; hex and plain text</text>
+<rect x='40' y='428' width='680' height='56' rx='8' fill='none' fill-opacity='1' stroke='#6b7280' stroke-width='1.25'/>
+<text x='56' y='452' font-weight='600' fill='#111827'>wcore: device</text>
+<text x='56' y='468' font-size='11.5' fill='#4b5563'>Containers (raw, IMD, DSK, EDSK, TD0), staging and commit; Physical, Linear, Mapping</text>
+<rect x='40' y='496' width='680' height='56' rx='8' fill='none' fill-opacity='1' stroke='#6b7280' stroke-width='1.25' stroke-dasharray='5 4'/>
+<text x='56' y='520' font-weight='600' fill='#111827'>Optional modules: an app compiles only what it registers</text>
+<text x='56' y='536' font-size='11.5' fill='#4b5563'>fs/dfs with .inf sidecars; fs/fat; later device/flux (HFE, SCP, WOZ)</text>
+<rect x='110' y='592' width='540' height='40' rx='8' fill='none' stroke='#6b7280' stroke-width='1.25'/>
+<text x='380' y='616' text-anchor='middle' fill='#111827'>Image files: .adl .ssd .dsk .imd .td0 scsi0.dat; later .hfe .scp .woz</text>
+</svg>
