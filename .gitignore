@@ -1,0 +1,9 @@
+# build folders and IDE files
+/build*/
+CMakeLists.txt.user
+*.pro.user
+.qmake.stash
+Makefile*
+*.o
+moc_*.cpp
+qrc_*.cpp
