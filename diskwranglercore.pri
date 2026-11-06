@@ -22,6 +22,15 @@ INCLUDEPATH += $$PWD
 
 HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/app/fileopen.h \
+           $$PWD/diskwrangler/text/textviews.h \
+           $$PWD/diskwrangler/text/viewers.h \
            $$PWD/diskwrangler/ui/buttonbar.h \
-           $$PWD/diskwrangler/ui/licences.h
-SOURCES += $$PWD/diskwrangler/ui/licences.cpp
+           $$PWD/diskwrangler/ui/licences.h \
+           $$PWD/diskwrangler/ui/treecolumns.h \
+           $$PWD/diskwrangler/ui/uihelpers.h \
+           $$PWD/diskwrangler/ui/viewerdialog.h \
+           $$PWD/diskwrangler/xfer/hostname.h
+SOURCES += $$PWD/diskwrangler/text/textviews.cpp \
+           $$PWD/diskwrangler/text/viewers.cpp \
+           $$PWD/diskwrangler/ui/licences.cpp \
+           $$PWD/diskwrangler/ui/viewerdialog.cpp

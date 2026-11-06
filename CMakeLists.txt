@@ -16,6 +16,7 @@ if(NOT CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)   # dragoutmime.h and viewerdialog.h have signals and slots
 
 # An application has found Qt already; on its own, the core finds it the way the applications do.
 if(NOT QT_VERSION_MAJOR)
@@ -29,11 +30,20 @@ endif()
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 add_library(diskwrangler-core STATIC
+    diskwrangler/text/textviews.cpp
+    diskwrangler/text/viewers.cpp
     diskwrangler/ui/licences.cpp
+    diskwrangler/ui/viewerdialog.cpp
     diskwrangler/app/appsettings.h
     diskwrangler/app/fileopen.h
+    diskwrangler/text/textviews.h
+    diskwrangler/text/viewers.h
     diskwrangler/ui/buttonbar.h
-    diskwrangler/ui/licences.h)
+    diskwrangler/ui/licences.h
+    diskwrangler/ui/treecolumns.h
+    diskwrangler/ui/uihelpers.h
+    diskwrangler/ui/viewerdialog.h
+    diskwrangler/xfer/hostname.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-core PUBLIC Qt${QT_VERSION_MAJOR}::Widgets)
@@ -44,4 +54,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_link_libraries(settingstest DiskWrangler::Core)
     add_test(NAME settingstest COMMAND settingstest)
     set_tests_properties(settingstest PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+    foreach(t uitest)
+        add_executable(${t} tests/${t}.cpp)
+        target_link_libraries(${t} DiskWrangler::Core)
+        add_test(NAME ${t} COMMAND ${t})
+        set_tests_properties(${t} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+    endforeach()
 endif()
