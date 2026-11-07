@@ -21,13 +21,17 @@ CONFIG += c++17
 INCLUDEPATH += $$PWD
 
 include($$PWD/diskwrangler-device.pri)          # the device layer: containers, Linear, checked saving
+include($$PWD/diskwrangler-fs.pri)              # the filesystem layer: Volume, Disc, detection
+# (the optional filesystem modules: diskwrangler-dfs.pri, diskwrangler-fat.pri)
 
 HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/app/fileopen.h \
+           $$PWD/diskwrangler/app/handoff.h \
            $$PWD/diskwrangler/text/textviews.h \
            $$PWD/diskwrangler/text/viewers.h \
            $$PWD/diskwrangler/ui/buttonbar.h \
            $$PWD/diskwrangler/ui/dragoutmime.h \
+           $$PWD/diskwrangler/ui/handoffdialog.h \
            $$PWD/diskwrangler/ui/licences.h \
            $$PWD/diskwrangler/ui/treecolumns.h \
            $$PWD/diskwrangler/ui/uihelpers.h \
@@ -36,9 +40,11 @@ HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/xfer/mime.h \
            $$PWD/diskwrangler/xfer/retrofiles.h \
            $$PWD/diskwrangler/xfer/transferitem.h
-SOURCES += $$PWD/diskwrangler/text/textviews.cpp \
+SOURCES += $$PWD/diskwrangler/app/handoff.cpp \
+           $$PWD/diskwrangler/text/textviews.cpp \
            $$PWD/diskwrangler/text/viewers.cpp \
            $$PWD/diskwrangler/ui/dragoutmime.cpp \
+           $$PWD/diskwrangler/ui/handoffdialog.cpp \
            $$PWD/diskwrangler/ui/licences.cpp \
            $$PWD/diskwrangler/ui/viewerdialog.cpp \
            $$PWD/diskwrangler/xfer/retrofiles.cpp

@@ -6,9 +6,11 @@
 #
 #     !include(core/diskwrangler-device.pri): error("core/ is empty: run 'git submodule update --init'")
 #
-# diskwranglercore.pri includes this file, so an application needs only that one. (CMake: the target
-# DiskWrangler::Device, which DiskWrangler::Core links.)
+# diskwranglercore.pri includes this file, so an application needs only that one; it is added only once however often
+# it is included. (CMake: the target DiskWrangler::Device, which DiskWrangler::Core links.)
 
+!contains(DW_PRI_DONE, device) {
+DW_PRI_DONE += device
 !exists($$PWD/diskwrangler/device/container.cpp) {
     error("DiskWranglerCore is missing: run 'git submodule update --init' in the application's folder")
 }
@@ -26,3 +28,4 @@ SOURCES += $$PWD/diskwrangler/device/container.cpp \
            $$PWD/diskwrangler/device/lzhuf.cpp \
            $$PWD/diskwrangler/device/safesave.cpp \
            $$PWD/diskwrangler/device/sideorder.cpp
+}

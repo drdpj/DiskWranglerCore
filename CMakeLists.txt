@@ -45,19 +45,59 @@ add_library(DiskWrangler::Device ALIAS diskwrangler-device)
 target_include_directories(diskwrangler-device PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-device PUBLIC Qt${QT_VERSION_MAJOR}::Core)
 
+# The filesystem layer (QtCore only): Volume, Disc, detection by tiers.
+add_library(diskwrangler-fs STATIC
+    diskwrangler/fs/detection.cpp
+    diskwrangler/fs/disc.cpp
+    diskwrangler/fs/volume.cpp
+    diskwrangler/fs/detection.h
+    diskwrangler/fs/disc.h
+    diskwrangler/fs/volume.h
+    diskwrangler/xfer/transferitem.h)
+add_library(DiskWrangler::Fs ALIAS diskwrangler-fs)
+target_include_directories(diskwrangler-fs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(diskwrangler-fs PUBLIC DiskWrangler::Device Qt${QT_VERSION_MAJOR}::Core)
+
+# Optional filesystem modules (QtCore only): an application links the ones it registers.
+add_library(diskwrangler-dfs STATIC
+    diskwrangler/fs/dfs/dfs.cpp
+    diskwrangler/fs/dfs/dfsprobe.cpp
+    diskwrangler/fs/dfs/dfsvolume.cpp
+    diskwrangler/fs/dfs/inf.cpp
+    diskwrangler/fs/dfs/dfs.h
+    diskwrangler/fs/dfs/dfsprobe.h
+    diskwrangler/fs/dfs/dfsvolume.h
+    diskwrangler/fs/dfs/inf.h)
+add_library(DiskWrangler::Dfs ALIAS diskwrangler-dfs)
+target_link_libraries(diskwrangler-dfs PUBLIC DiskWrangler::Fs)
+
+add_library(diskwrangler-fat STATIC
+    diskwrangler/fs/fat/fat.cpp
+    diskwrangler/fs/fat/fatprobe.cpp
+    diskwrangler/fs/fat/fatvolume.cpp
+    diskwrangler/fs/fat/fat.h
+    diskwrangler/fs/fat/fatprobe.h
+    diskwrangler/fs/fat/fatvolume.h)
+add_library(DiskWrangler::Fat ALIAS diskwrangler-fat)
+target_link_libraries(diskwrangler-fat PUBLIC DiskWrangler::Fs)
+
 add_library(diskwrangler-core STATIC
+    diskwrangler/app/handoff.cpp
     diskwrangler/text/textviews.cpp
     diskwrangler/text/viewers.cpp
     diskwrangler/ui/dragoutmime.cpp
+    diskwrangler/ui/handoffdialog.cpp
     diskwrangler/ui/licences.cpp
     diskwrangler/ui/viewerdialog.cpp
     diskwrangler/xfer/retrofiles.cpp
     diskwrangler/app/appsettings.h
     diskwrangler/app/fileopen.h
+    diskwrangler/app/handoff.h
     diskwrangler/text/textviews.h
     diskwrangler/text/viewers.h
     diskwrangler/ui/buttonbar.h
     diskwrangler/ui/dragoutmime.h
+    diskwrangler/ui/handoffdialog.h
     diskwrangler/ui/licences.h
     diskwrangler/ui/treecolumns.h
     diskwrangler/ui/uihelpers.h
@@ -68,7 +108,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/xfer/transferitem.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device DiskWrangler::Fs Qt${QT_VERSION_MAJOR}::Widgets)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()

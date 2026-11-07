@@ -1,0 +1,91 @@
+/*
+ * Detection questions and hand-off messages - part of DiskWranglerCore, used by Acorn Disk Wrangler and CP/M Disk Wrangler
+ * Copyright (C) 2026 Daniel Jameson
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+#include "handoffdialog.h"
+
+#include <QCheckBox>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QPushButton>
+
+#include <diskwrangler/app/appsettings.h>
+#include <diskwrangler/app/handoff.h>
+
+namespace dw {
+namespace ui {
+
+// "a CP/M disc", "an Acorn disc": what the owner's discs are called in the message
+static QString discWord(const fs::Candidate &c) {
+    const QString n = c.name.isEmpty() ? c.owner.name : c.name;
+    const QChar f = n.isEmpty() ? QChar('x') : n[0].toUpper();
+    return QString(QString("AEIOU").contains(f) ? "an " : "a ") + n + " disc";
+}
+
+bool handOff(QWidget *parent, const fs::Candidate &c, const QString &imagePath, const QString &title, const QString &text,
+             bool interactive, bool allowStart) {
+    QString why;
+    const bool started = allowStart && !app::handedBack(imagePath) && app::startOtherApp(c.owner, imagePath, &why);
+    if (!interactive) return started;
+    if (started) {
+        const QString key = "handoff/quiet/" + c.owner.id;
+        if (AppSettings().value(key, false).toBool()) return true;
+        QMessageBox box(QMessageBox::Information, title.isEmpty() ? "Opened in " + c.owner.name : title,
+                        QString("This is %1, so it has been opened in %2.").arg(discWord(c), c.owner.name),
+                        QMessageBox::Ok, parent);
+        box.setInformativeText(QFileInfo(imagePath).fileName() + ": " + c.description);
+        auto *quiet = new QCheckBox("Don't show this again");
+        box.setCheckBox(quiet);
+        box.exec();
+        if (quiet->isChecked()) AppSettings().setValue(key, true);
+        return true;
+    }
+    if (title.isEmpty()) return false;
+    QMessageBox box(QMessageBox::Information, title, text, QMessageBox::Ok, parent);
+    box.setTextFormat(Qt::PlainText);
+    box.setInformativeText(releasesLink(c.owner));
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.exec();
+    return false;
+}
+
+QString releasesLink(const fs::OtherApp &app) {
+    return QString("<a href=\"%1\">Get %2</a>").arg(app.releases.toHtmlEscaped(), app.name.toHtmlEscaped());
+}
+
+int askWhich(QWidget *parent, const QString &imagePath, const fs::Candidate &a, const fs::Candidate &b) {
+    auto line = [](const fs::Candidate &c) {
+        return "- " + c.description + (c.foreign() ? " (" + c.owner.name + " opens these)" : QString());
+    };
+    QMessageBox box(QMessageBox::Question, "Which kind of disc?",
+                    QString("%1 could be either of these, and its contents don't say which:\n\n%2\n%3")
+                        .arg(QFileInfo(imagePath).fileName(), line(a), line(b)),
+                    QMessageBox::NoButton, parent);
+    auto button = [](const fs::Candidate &c) {
+        return c.foreign() ? "Open in " + c.owner.name : "Open as " + (c.name.isEmpty() ? c.fsId : c.name);
+    };
+    QPushButton *pa = box.addButton(button(a), QMessageBox::AcceptRole);
+    QPushButton *pb = box.addButton(button(b), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(pa);
+    box.exec();
+    if (box.clickedButton() == pa) return 0;
+    if (box.clickedButton() == pb) return 1;
+    return -1;
+}
+
+} // namespace ui
+} // namespace dw
