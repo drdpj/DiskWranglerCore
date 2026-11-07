@@ -2,7 +2,7 @@
 
 Nov 6, 2026 · Daniel
 
-> This copy in DiskWranglerCore (`docs/design.md`) is now the canonical design. It began as a Claude doc; later changes are made here. See "Amendments from step 1" at the end for what changed during step 1.
+> This copy in DiskWranglerCore (`docs/design.md`) is now the canonical design. It began as a Claude doc; later changes are made here. See the "Amendments" sections at the end for what changed in each step.
 
 ## Summary
 
@@ -504,3 +504,56 @@ Step 2 created v0.2.0: the UI helpers, `TransferItem`, the retro-files reader an
 9. **`anyCase` gives every pattern an upper-case twin**, as both programs' copies did, with patterns that are already upper case or have no letters left alone.
 10. **Forwarding shims.** The apps' `mainwindow_p.h` and `viewtext.h` have `using dw::...` and `#define WRANGLER_MIME_*`/`CPMDW_MIME_*` aliases so that step 2's patch stays small. The Haiku tasks in the plan remove them.
 
+
+## Amendments from step 3
+
+Step 3 created v0.3.0: the device layer (`diskwrangler/device/`, QtCore only), CP/M Disk Wrangler on it in place of
+its `Disk::Image`, and Acorn Disk Wrangler's `Adfs::Image`, DFS and DOS on it. What turned out different from the
+design above:
+
+1. **One `Container` class, not one per format.** `Container` is CP/M's `Disk::Image` moved (ImageDisk, DSK and
+   TeleDisk in `container_formats.cpp`, LZHUF in `lzhuf.cpp`) with a `Kind`; a class per format would only have
+   split one switch. `Physical` is an interface that `Container` implements; `physical()` returns the container,
+   or `nullptr` for a raw file with no `RawLayout` yet. `indexOfId` is added.
+2. **Raw files are read from the file, and staged in 128-byte blocks.** A raw file without a layout has no
+   sectors, and every sector size and track offset is a multiple of 128, so the staging unit of a raw file is a
+   128-byte block of the file (the other containers stage per sector, as before). The file stays open read-only
+   while the image is open (CP/M Disk Wrangler used to read it whole and close it).
+3. **`Linear` stands on the container's stored bytes, not on `Physical` plus a sector `Mapping`.** The stored bytes
+   are the disc as a raw file holds it: the file itself, or for ImageDisk, DSK and TeleDisk the tracks cylinder by
+   cylinder, side 0 then side 1, sectors in ID order (this needs every track to have the same shape; otherwise
+   there is no stored view and an Acorn disc doesn't open). On top of that, the side order is a byte-level track
+   translation, `SideOrder` (Acorn's `SideLayout` moved), as Acorn needs it: it is about tracks, not sectors, and a
+   DOS Plus 800K disc's 1024-byte sectors would not fit a 256-byte sector mapping. So there is no `Mapping`,
+   `SideOrderMapping` or `CpmMapping` yet: CP/M addresses sectors directly through `Format::locate`, which the
+   `Volume` work in step 4 can wrap if it needs to. FLEX's addressing by sector ID is `indexOfId`.
+4. **DFS and DOS hold a pointer to the image's whole-disc `Linear`**, not a sliced copy, and keep their own offset
+   arithmetic (`phys()`, `sin * 256`): a side-order conversion changes the image's `Linear` at Save, and the volumes
+   must follow it. `Linear::slice` exists for step 4. `Dfs::Disc::attach` and `Dos::Volume::attach*` take a
+   `Linear *`; the `Adfs::Image *` overloads forward to it, so neither depends on `Adfs::Image` any more.
+5. **Saving does not use `QSaveFile`**: its temporary file can't be opened again by name before it is committed,
+   so step 4 of Saving (read the copy back) would be impossible. `SafeSave` writes `<name>.dwsave-XXXXXX` beside the
+   image, flushes it to the disc (`fsync` / `_commit`), lets the caller check it, makes the `.bak` (a hard link on
+   POSIX, a copy on Windows), then renames it over the original (`rename(2)` / `MoveFileExW`). Permissions carry
+   over; ownership only where the system allows it. `Container::commit(SaveOptions)` has `validate` (before) and
+   `verify` (the written copy, opened as a `Container`); the container itself first reads back every staged write.
+6. **Where each program checks.** Acorn: `Adfs::Image::commit` validates as before, then its `verify` opens the
+   copy as an `Adfs::Image` and runs `validate()` and a new *reopen validator* (DOS and DFS attached to the copy and
+   checked when their area changed). CP/M: `MainWindow::checkWritten` attaches each side's `Cpm::Volume` to the copy
+   and checks it, for Save and Save As.
+7. **Acorn keeps its staging semantics.** A raw block written with the bytes it already holds stays staged, so
+   `dirty()` is what it was; through `Physical::write` an unchanged sector is dropped, as CP/M did. Acorn's refusal
+   to save when sectors 0-1 changed on disc since opening stays (read through a fresh container).
+8. **Side-order conversion** is staged as the whole disc laid out in the other order, then saved like any other
+   change (the design said `saveAs` with another mapping; the conversion is still done at Save, to the same file).
+   Only a raw file has a side order: ImageDisk, DSK and TeleDisk record where each track is.
+9. **Acorn discs in other containers.** Detection runs on the stored bytes with the side order fixed as interleaved
+   and adds "in an ImageDisk file" (and so on) to the description. An ImageDisk or DSK file saves back as itself;
+   TeleDisk opens read-only. Acorn's Save As still copies the file, so converting between containers is CP/M Disk
+   Wrangler's Save As for now.
+10. **Free space** is checked against the new file's size; a `.bak` copy (Windows) needs as much again.
+11. **Forwarding names for the tests:** CP/M's `src/diskimage.h` is now only `Disk::Image = dw::device::Container`
+    and friends (the GUI test includes it through `mainwindow.h`); Acorn's `adfs.h` keeps `SideLayout`,
+    `layoutFile` and `reorderSides` as `using`s. Tests that compile the filesystem code include
+    `core/diskwrangler-device.pri` (QtCore only; CMake `DiskWrangler::Device`, which `DiskWrangler::Core` links).
+12. **Not done here, as planned:** `Disc::transact`, mounts and per-class staging removal (steps 4 and 6).
