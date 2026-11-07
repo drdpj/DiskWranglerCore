@@ -557,3 +557,65 @@ design above:
     `layoutFile` and `reorderSides` as `using`s. Tests that compile the filesystem code include
     `core/diskwrangler-device.pri` (QtCore only; CMake `DiskWrangler::Device`, which `DiskWrangler::Core` links).
 12. **Not done here, as planned:** `Disc::transact`, mounts and per-class staging removal (steps 4 and 6).
+
+## Amendments from step 4
+
+Step 4 created v0.4.0: the filesystem layer (`diskwrangler/fs/`, QtCore only), the DFS and FAT modules, detection by
+tiers in both programs, and the hand-over of a disc to the program it belongs to. What turned out different from the
+design above:
+
+1. **`detection.h`, not `detect.h`.** qmake puts every object file in one folder, and CP/M Disk Wrangler has its
+   own `src/detect.cpp`; two `detect.o` would overwrite each other. Rule: a core `.cpp` file never has the name of
+   an application's.
+2. **Tiers are `Certain`, `Likely`, `Possible`; "foreign" is not a tier.** A candidate that belongs to another
+   program has `owner` set (`OtherApp`: id, name, Windows folder, releases page) and an ordinary tier: an Acorn Z80
+   CP/M or Torch CP/N disc is `Certain` for Acorn Disk Wrangler, a disc that is plainly Acorn's `Likely` for CP/M
+   Disk Wrangler. `decide()` sorts by tier, keeping the probes' order and each probe's own ranking among equals;
+   it asks when the best two candidates come from different probes and share a tier of `Likely` or better, and hands
+   the disc over when the best has an owner. Candidates also carry `name` (for buttons) and `supported` (ADFS D/E is
+   recognised, not opened).
+3. **`Probe`, not `FsFactory`, and no `mount` function.** A candidate carries the probe's own result in `std::any
+   data` (Acorn's `DiskInfo`, CP/M's `Detect::Result`), and the program opens the disc from it as before. Presets and
+   the format editor wait for the generic window (step 5). CP/M's scored search is one probe whose single candidate
+   is its best reading (`Certain` at high confidence or when the user confirmed the format, `Likely` with CP/M files,
+   else `Possible`); its ranking stays inside the probe.
+4. **The foreign recognisers are the old refusals.** Acorn: Torch CP/N (a probe in the app) and Acorn Z80 CP/M (in
+   the DFS module, `isCpmFence`). CP/M: `Detect::otherFilesystem` (ADFS, DFS, FAT), exactly what made it say "not
+   CP/M" before. CP/M Disk Wrangler's own detection is unchanged; the tiers sit on top of it (`Cpm::verdict`).
+5. **Old and new detection side by side**: Acorn's `tests/legacydetect.cpp` is the old `detectDisk` unchanged,
+   and `agreetest` compares every field of the result on every test image, real disc and container copy, with the
+   side order detected and forced both ways (704 checks), and checks that none of them would ask.
+6. **`Volume` additions**: `stat`, `volumeValues`, default `toRetro` / `fromRetro` built from the `AttrSpec`s
+   (`retroFamily`, `retroKey`), and `placeIncoming` returning a `Placement` (directory, name, warning). `AttrSpec`
+   has `Hex` with `bits` (not `Hex32`) and `dirs` (directories have it too). `actions()` waits for step 5.
+7. **`Disc`** holds its volumes as `shared_ptr`, `Mount` has the `group` the UI section asked for, `transact` takes a
+   `std::function`, and `commit` puts `validateAll()` in front of the container's checked save. Acorn's ADFS keeps
+   `Adfs::Image::commit` (map checks, the changed-on-disc refusal, padding, side-order conversion), so its
+   `OpenedDisc::save` runs `validateAll()` and then that.
+8. **Adapters.** In the core: `dw::dfs::Volume` (a flat list; the path is the full name `A.PROG`) and
+   `dw::fat::FsVolume`. In the programs: `Adfs::AdfsVolume` and `Adfs::OpenedDisc` (`src/adfsvolume.*`), and
+   `Cpm::CpmVolume` (user areas as `Namespace` levels named `user 0` ... `user 15`) and `Cpm::OpenedDisc`
+   (`src/cpmvolume.*`). Torch CP/N is still a mode of `Cpm::Volume` (its `fsId` is `torch`). The main windows don't
+   use the adapters yet (step 5); `voltest` in each program, the core's `volumetest` and `moduletest`, and the
+   command-line programs of step 4b do. The FAT and DFS classes gained `reload()` for `Disc::transact`, and
+   `Adfs::Image` too (it reads the free space map again).
+9. **The DFS module** also took the shared Acorn helpers: `bootOptionName`, `bcdInc`, the address helpers
+   (`extendAddr`, `addrText`, `parseAddr`), the `.inf` line parser and writers (`inf.h`; finding the sidecar file is
+   there too, turning it into the program's own flags stays in Acorn Disk Wrangler), `placeLetter`, and Acorn Z80
+   CP/M's catalogue (`cpmFenceCatalogue`, `isCpmFence`, which CP/M Disk Wrangler's `acornDfsCatalogue` now calls).
+   The DFS new-disc presets stay in Acorn's `NewDisc` until the presets registry (step 5). `Adfs::Report` is
+   `dw::fs::Report`; `src/dfs.h` and `src/dosfs.h` keep `Dfs::` and `Dos::` as namespace aliases for the tests.
+10. **DFS letters on ADFS.** The letters ADFS can't take are decided by the target's own name rule (Acorn Disk
+    Wrangler's `isValidNameChar`, which also refuses `% \ |`, so those become `X_NAME` too), and its DFS never makes
+    `#`, `*` or `"` directories in the first place. The main window now copies such a file as `X_NAME` with a warning
+    in the import summary (before: a directory called `_`). The "flatten" choice exists in the adapter
+    (`AdfsVolume::setFlattenLetters`) but has no setting in the window yet: that comes with step 5's settings.
+11. **Hand-over** (`app/handoff.h`, `ui/handoffdialog.h`): the program is looked for in the settings key
+    `otherApps/<id>` (no Preferences page for it yet), beside this program, then in the system's registrations;
+    the started program gets `DISKWRANGLER_HANDOFF=<image>` in its environment and never hands that image back,
+    so two programs that disagree can't pass an image to and fro. "Don't show this again" is `handoff/quiet/<id>`.
+    When the other program isn't found, CP/M Disk Wrangler keeps its old message with its "Choose a format..."
+    button and adds the releases link. The tests never start the other program (`autoAnswer`, or the detection
+    alone); starting it has been checked only on Linux by hand, not on Windows or macOS.
+12. **`.pri` files** are each added only once however often they are included (`DW_PRI_DONE`), so a module's
+    `.pri` can include the layers it stands on.

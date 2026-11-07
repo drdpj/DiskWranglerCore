@@ -9,14 +9,16 @@ macOS "open from the Finder" filter, the Help > Licences viewer, the CI scripts,
 settings test. Version 0.2 adds the small UI helpers, the transfer item and the retro-files reader and writer, and
 the file-viewer registry with its dialog. Version 0.3 adds the device layer: the disc image containers (raw,
 ImageDisk, DSK, extended DSK, TeleDisk) with staged writes, the `Linear` view of a disc in its own sector numbering
-(side orders, slices), and the checked save every program uses. The filesystem layer follows in later versions;
-the plan is in [docs/design.md](docs/design.md).
+(side orders, slices), and the checked save every program uses. Version 0.4 adds the filesystem layer: the `Volume`
+interface (files by path, attributes described by `AttrSpec`), `Disc` (one image, several mounted volumes,
+transactions), detection by tiers with the hand-over of a disc to the program it belongs to, and the first two
+optional filesystem modules, DFS (with `.inf` files) and FAT. The plan is in [docs/design.md](docs/design.md).
 
 ## Using it
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v0.3.0
+    git -C core checkout v0.4.0
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you
@@ -32,7 +34,10 @@ CMake (Qt 6 or Qt 5) links a static library:
     target_link_libraries(myapp DiskWrangler::Core)
 
 Headers are included as `<diskwrangler/ui/licences.h>`; everything is in `diskwrangler/<module>/`. A test or tool
-that needs only the device layer (QtCore) can include `core/diskwrangler-device.pri`, or link `DiskWrangler::Device`.
+that needs only the device layer (QtCore) can include `core/diskwrangler-device.pri`, or link `DiskWrangler::Device`;
+the filesystem layer alone is `core/diskwrangler-fs.pri` / `DiskWrangler::Fs`. The filesystem modules are optional:
+a program takes the ones it registers, `core/diskwrangler-dfs.pri` / `DiskWrangler::Dfs` and
+`core/diskwrangler-fat.pri` / `DiskWrangler::Fat` (each `.pri` brings what it stands on, and adds it only once).
 
 ## Layout
 | Folder | Holds |
@@ -42,9 +47,12 @@ that needs only the device layer (QtCore) can include `core/diskwrangler-device.
 | `diskwrangler/xfer/` | `TransferItem`, the retro-files reader and writer with its `HostPolicy`, `hostSafeName`, the private MIME types (QtCore only) |
 | `diskwrangler/text/` | the file-viewer registry with the Plain and Hex viewers, and the text helpers (QtCore only) |
 | `diskwrangler/device/` | `Container` (the image file: raw, ImageDisk, DSK / extended DSK, TeleDisk; physical and stored-bytes views; staging; `commit` and `saveAs`), `Linear` (a disc as one run of bytes, through a `SideOrder`), `SafeSave` (temporary copy, check, `.bak`, atomic replace) (QtCore only) |
+| `diskwrangler/fs/` | `Volume`, `Path`, `Entry`, `AttrSpec`, `NameRules` (`volume.h`), `Disc` with its mounts, transactions and checked save (`disc.h`), detection by tiers: `Probe`, `Candidate`, `decide` (`detection.h`) (QtCore only) |
+| `diskwrangler/fs/dfs/`, `fs/fat/` | the optional modules: Acorn DFS (Watford 62-file catalogues, `.inf` lines, addresses, directory letters copied to ADFS, Acorn Z80 CP/M's catalogue) and FAT12/16, each with its probe and its `Volume` adapter (QtCore only) |
+| `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
 | `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...` |
 | `docs/` | building and releasing; the retro-files drag format |
-| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog) and `devicetest` (containers, staging, `Linear`, the checked save): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
+| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog) `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) and `moduletest` (the DFS and FAT modules): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
 
 ## Versions
 Semantic-version tags. `v0.x` until the filesystem interface settles; a program pins one tag through its submodule,
