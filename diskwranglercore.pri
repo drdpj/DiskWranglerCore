@@ -20,6 +20,8 @@ QT += widgets
 CONFIG += c++17
 INCLUDEPATH += $$PWD
 
+include($$PWD/diskwrangler-device.pri)          # the device layer: containers, Linear, checked saving
+
 HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/app/fileopen.h \
            $$PWD/diskwrangler/text/textviews.h \

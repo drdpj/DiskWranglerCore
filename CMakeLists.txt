@@ -29,6 +29,22 @@ if(NOT QT_VERSION_MAJOR)
 endif()
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
+# The device layer (QtCore only): disc image containers, Linear views, checked saving.
+add_library(diskwrangler-device STATIC
+    diskwrangler/device/container.cpp
+    diskwrangler/device/container_formats.cpp
+    diskwrangler/device/linear.cpp
+    diskwrangler/device/lzhuf.cpp
+    diskwrangler/device/safesave.cpp
+    diskwrangler/device/sideorder.cpp
+    diskwrangler/device/container.h
+    diskwrangler/device/linear.h
+    diskwrangler/device/safesave.h
+    diskwrangler/device/sideorder.h)
+add_library(DiskWrangler::Device ALIAS diskwrangler-device)
+target_include_directories(diskwrangler-device PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(diskwrangler-device PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+
 add_library(diskwrangler-core STATIC
     diskwrangler/text/textviews.cpp
     diskwrangler/text/viewers.cpp
@@ -52,7 +68,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/xfer/transferitem.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(diskwrangler-core PUBLIC Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device Qt${QT_VERSION_MAJOR}::Widgets)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
