@@ -5,5 +5,7 @@ CONFIG += c++17 console
 CONFIG -= app_bundle
 TARGET = uitest
 INCLUDEPATH += $$PWD/..
-SOURCES += uitest.cpp ../diskwrangler/text/textviews.cpp ../diskwrangler/text/viewers.cpp ../diskwrangler/ui/viewerdialog.cpp
-HEADERS += ../diskwrangler/text/textviews.h ../diskwrangler/text/viewers.h ../diskwrangler/ui/treecolumns.h ../diskwrangler/ui/uihelpers.h ../diskwrangler/ui/viewerdialog.h
+SOURCES += uitest.cpp ../diskwrangler/text/textviews.cpp ../diskwrangler/text/viewers.cpp ../diskwrangler/ui/viewerdialog.cpp \
+           ../diskwrangler/app/handoff.cpp
+HEADERS += ../diskwrangler/text/textviews.h ../diskwrangler/text/viewers.h ../diskwrangler/ui/treecolumns.h ../diskwrangler/ui/uihelpers.h ../diskwrangler/ui/viewerdialog.h \
+           ../diskwrangler/app/handoff.h ../diskwrangler/app/appsettings.h

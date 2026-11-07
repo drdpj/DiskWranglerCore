@@ -14,6 +14,12 @@
 #include <diskwrangler/ui/treecolumns.h>
 #include <diskwrangler/ui/uihelpers.h>
 #include <diskwrangler/ui/viewerdialog.h>
+#include <diskwrangler/app/appsettings.h>
+#include <diskwrangler/app/handoff.h>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QTemporaryDir>
+#include <QThread>
 
 using namespace dw;
 
@@ -150,6 +156,40 @@ int main(int argc, char **argv) {
         CHECK(info(w)->text() == QString("%1 bytes  -  showing the first 1 MiB only").arg(big.size()) && w->shownText().count('\n') == 1024 * 1024 / 16, "the others get the first 1 MiB and say so");
         delete w;
     }
+
+#ifdef Q_OS_UNIX
+    printf("== handing an image to another program of the family\n");
+    {
+        QCoreApplication::setOrganizationName("diskwranglercore-uitest");
+        QCoreApplication::setApplicationName("handoff");
+        QTemporaryDir tmp;
+        const QString prog = tmp.filePath("fakewrangler"), out = tmp.filePath("out.txt"), img = tmp.filePath("disc.img");
+        QFile s(prog);
+        s.open(QIODevice::WriteOnly);
+        s.write(QString("#!/bin/sh\nprintf '%s\\n%s\\n' \"$1\" \"$DISKWRANGLER_HANDOFF\" > '%1.part' && mv '%1.part' '%1'\n").arg(out).toUtf8());
+        s.close();
+        s.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        QFile(img).open(QIODevice::WriteOnly);
+        const dw::fs::OtherApp other{"no-such-wrangler-xyz", "No Such Wrangler", "No Such Wrangler", "https://example.org"};
+        QString why;
+        CHECK(dw::app::findOtherApp(other).isEmpty() && !dw::app::startOtherApp(other, img, &why) && why.contains("not found"),
+              "a program that isn't there: not started, and says so");
+        AppSettings().setValue("otherApps/" + other.id, prog);       // the path the user set wins
+        CHECK(dw::app::findOtherApp(other) == prog, "the path set in the settings is used");
+        CHECK(dw::app::startOtherApp(other, img, &why), "started");
+        QElapsedTimer t;
+        t.start();
+        while (!QFile::exists(out) && t.elapsed() < 10000) QThread::msleep(20);
+        QFile o(out);
+        const QStringList lines = o.open(QIODevice::ReadOnly) ? QString::fromUtf8(o.readAll()).split('\n') : QStringList();
+        CHECK(lines.size() >= 2 && lines[0] == img && lines[1] == img, "it got the image, and was told in its environment that it was handed it");
+        CHECK(!dw::app::handedBack(img), "this program wasn't handed the image");
+        qputenv(dw::app::HandoffVariable, img.toUtf8());
+        CHECK(dw::app::handedBack(img) && !dw::app::handedBack(prog), "a program started with it knows not to hand it back");
+        qunsetenv(dw::app::HandoffVariable);
+        AppSettings().remove("otherApps/" + other.id);
+    }
+#endif
 
     printf(failures ? "%d FAILURES\n" : "all ok\n", failures);
     return failures ? 1 : 0;
