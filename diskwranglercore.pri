@@ -22,7 +22,8 @@ INCLUDEPATH += $$PWD
 
 include($$PWD/diskwrangler-device.pri)          # the device layer: containers, Linear, checked saving
 include($$PWD/diskwrangler-fs.pri)              # the filesystem layer: Volume, Disc, detection
-# (the optional filesystem modules: diskwrangler-dfs.pri, diskwrangler-fat.pri)
+include($$PWD/diskwrangler-xfer.pri)            # transfer items and retro-files (QtCore only)
+# (the optional modules: diskwrangler-dfs.pri, diskwrangler-fat.pri, and for a console program diskwrangler-cli.pri)
 
 HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/app/fileopen.h \
@@ -38,7 +39,6 @@ HEADERS += $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/ui/viewerdialog.h \
            $$PWD/diskwrangler/xfer/hostname.h \
            $$PWD/diskwrangler/xfer/mime.h \
-           $$PWD/diskwrangler/xfer/retrofiles.h \
            $$PWD/diskwrangler/xfer/transferitem.h
 SOURCES += $$PWD/diskwrangler/app/handoff.cpp \
            $$PWD/diskwrangler/text/textviews.cpp \
@@ -46,5 +46,4 @@ SOURCES += $$PWD/diskwrangler/app/handoff.cpp \
            $$PWD/diskwrangler/ui/dragoutmime.cpp \
            $$PWD/diskwrangler/ui/handoffdialog.cpp \
            $$PWD/diskwrangler/ui/licences.cpp \
-           $$PWD/diskwrangler/ui/viewerdialog.cpp \
-           $$PWD/diskwrangler/xfer/retrofiles.cpp
+           $$PWD/diskwrangler/ui/viewerdialog.cpp

@@ -49,6 +49,8 @@ public:
     fs::AttrValues volumeValues() const override { return {{"label", m_v->label()}}; }
     const fs::NameRules &names() const override { return m_names; }
     fs::VolumeInfo info() const override;
+    // "/" or "\\" between names, a leading one optional; displayPath: "/GAMES/ELITE.COM", the root "/".
+    bool parsePath(const QString &text, fs::Path *out, QString *err) const override;
 
     bool list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const override;
     bool read(const fs::Path &file, QByteArray *out, QString *err) const override;

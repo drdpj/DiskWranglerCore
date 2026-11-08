@@ -69,6 +69,13 @@ fs::VolumeInfo FsVolume::info() const {
     return i;
 }
 
+bool FsVolume::parsePath(const QString &text, fs::Path *out, QString *) const {
+    QString t = text;
+    t.replace('\\', '/');
+    *out = fs::Path::fromString(t, '/');
+    return true;
+}
+
 quint8 FsVolume::attrBits(const fs::AttrValues &a, quint8 base) {
     auto bit = [&](const char *k, quint8 b) {
         if (!a.contains(k)) return;

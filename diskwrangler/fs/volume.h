@@ -137,6 +137,15 @@ public:
     virtual const NameRules &names() const = 0;
     virtual VolumeInfo info() const = 0;
 
+    // Path text, as a command line or a script writes it (docs/cli.md, "Volumes and paths"). The defaults split on
+    // "/" (a leading one optional), the empty string and "/" being the root, and show "/a/b"; a filesystem with its own syntax overrides both. parsePath only
+    // reads the syntax: it neither checks that the names exist nor rejects wildcard characters. displayPath is the
+    // text parsePath reads back to the same Path.
+    virtual bool parsePath(const QString &text, Path *out, QString *err) const;
+    virtual QString displayPath(const Path &p) const;
+    // What to call an entry on the host when that isn't its name (CP/M in a national character set). Empty = its name.
+    virtual QString hostNameFor(const Entry &) const { return QString(); }
+
     virtual bool list(const Path &dir, QVector<Entry> *out, QString *err) const = 0;
     virtual bool stat(const Path &node, Entry *out, QString *err) const;     // by default: list the parent, find it
     virtual bool read(const Path &file, QByteArray *out, QString *err) const = 0;
@@ -159,6 +168,9 @@ public:
     // JSON booleans, Hex as 8 hex digits, the rest as they are); a filesystem whose attributes don't map one to one
     // (Acorn's "access" letters) overrides them.
     virtual QMap<QString, QJsonObject> toRetro(const Entry &e) const;
+    // The same for an entry listed in dir, for a filesystem whose attributes depend on where the entry is (CP/M's user
+    // number). What extraction and copying use; by default toRetro(e).
+    virtual QMap<QString, QJsonObject> toRetroIn(const Path &, const Entry &e) const { return toRetro(e); }
     virtual AttrValues fromRetro(const QMap<QString, QJsonObject> &families, NodeKind kind) const;
 
     // Where an item copied in (from any filesystem) goes when dropped on targetDir. By default: there, with the

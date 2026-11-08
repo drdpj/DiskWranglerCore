@@ -18,11 +18,13 @@ DW_PRI_DONE += device
 CONFIG += c++17
 INCLUDEPATH += $$PWD
 
-HEADERS += $$PWD/diskwrangler/device/container.h \
+HEADERS += $$PWD/diskwrangler/app/clock.h \
+           $$PWD/diskwrangler/device/container.h \
            $$PWD/diskwrangler/device/linear.h \
            $$PWD/diskwrangler/device/safesave.h \
            $$PWD/diskwrangler/device/sideorder.h
-SOURCES += $$PWD/diskwrangler/device/container.cpp \
+SOURCES += $$PWD/diskwrangler/app/clock.cpp \
+           $$PWD/diskwrangler/device/container.cpp \
            $$PWD/diskwrangler/device/container_formats.cpp \
            $$PWD/diskwrangler/device/linear.cpp \
            $$PWD/diskwrangler/device/lzhuf.cpp \

@@ -100,6 +100,14 @@ int main(int argc, char **argv) {
               "names from the host keep a letter: " + vol->names().fromHost("a.long name", fs::NodeKind::File));
         QString why;
         CHECK(!vol->names().valid("TOOLONGNAME", fs::NodeKind::File, &why) && vol->names().valid("Z.OK", fs::NodeKind::File, &why), "name rules");
+        {   // the command-line hooks: paths as people type them, and as they are shown
+            fs::Path pp;
+            QString pe;
+            CHECK(vol->parsePath("A.PROG", &pp, &pe) && vol->displayPath(pp) == "A.PROG", "parsePath D.NAME, displayPath D.NAME");
+            CHECK(vol->parsePath("BOOT", &pp, &pe) && vol->displayPath(pp) == "$.BOOT", "parsePath NAME is in $, shown as $.NAME");
+            CHECK(vol->parsePath("/", &pp, &pe) && pp.parts.isEmpty() && vol->displayPath(pp) == "$" && vol->parsePath("$", &pp, &pe) && pp.parts.isEmpty(), "the root is /, $ or empty");
+            CHECK(!vol->parsePath("a/b", &pp, &pe) && !pe.isEmpty(), "a slash is not a DFS path");
+        }
         CHECK(vol->check().ok(), "check");
         const device::Container::Snapshot before = c.snapshot();
         CHECK(!fd.transact([&](QString *e) {
@@ -235,6 +243,12 @@ int main(int argc, char **argv) {
         CHECK(vol->remove(fs::Path({"GAMES"}), &err) && vol->list(fs::Path(), &l, &err) && l.isEmpty() && vol->info().free == vol->info().total,
               "removing the directory frees everything");
         CHECK(vol->names().fromHost("long file name.text", fs::NodeKind::File) == fat::Volume::fromHost("long file name.text"), "names from the host");
+        {
+            fs::Path pp;
+            QString pe;
+            CHECK(vol->parsePath("GAMES\\ELITE.COM", &pp, &pe) && pp.parts == QStringList({"GAMES", "ELITE.COM"}) && vol->displayPath(pp) == "/GAMES/ELITE.COM", "FAT: a backslash is a slash");
+            CHECK(vol->parsePath("/", &pp, &pe) && pp.parts.isEmpty() && vol->displayPath(pp) == "/", "FAT: the root");
+        }
         // 800K Acorn DOS Plus: FAT at 0, media FD
         QByteArray a800(819200, 0);
         a800[0] = char(0xFD); a800[1] = char(0xFF); a800[2] = char(0xFF);

@@ -39,6 +39,13 @@ Path Path::child(const QString &n) const {
     return p;
 }
 
+bool Volume::parsePath(const QString &text, Path *out, QString *) const {
+    *out = Path::fromString(text, '/');
+    return true;
+}
+
+QString Volume::displayPath(const Path &p) const { return "/" + p.toString('/'); }
+
 bool Volume::stat(const Path &node, Entry *out, QString *err) const {
     if (node.isRoot()) {
         *out = Entry();

@@ -31,12 +31,14 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 # The device layer (QtCore only): disc image containers, Linear views, checked saving.
 add_library(diskwrangler-device STATIC
+    diskwrangler/app/clock.cpp
     diskwrangler/device/container.cpp
     diskwrangler/device/container_formats.cpp
     diskwrangler/device/linear.cpp
     diskwrangler/device/lzhuf.cpp
     diskwrangler/device/safesave.cpp
     diskwrangler/device/sideorder.cpp
+    diskwrangler/app/clock.h
     diskwrangler/device/container.h
     diskwrangler/device/linear.h
     diskwrangler/device/safesave.h
@@ -52,11 +54,33 @@ add_library(diskwrangler-fs STATIC
     diskwrangler/fs/volume.cpp
     diskwrangler/fs/detection.h
     diskwrangler/fs/disc.h
-    diskwrangler/fs/volume.h
-    diskwrangler/xfer/transferitem.h)
+    diskwrangler/fs/volume.h)
 add_library(DiskWrangler::Fs ALIAS diskwrangler-fs)
 target_include_directories(diskwrangler-fs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-fs PUBLIC DiskWrangler::Device Qt${QT_VERSION_MAJOR}::Core)
+
+# The transfer layer (QtCore only): transfer items, host names, retro-files (.inf / manifest / JSON).
+add_library(diskwrangler-xfer STATIC
+    diskwrangler/xfer/retrofiles.cpp
+    diskwrangler/xfer/hostname.h
+    diskwrangler/xfer/mime.h
+    diskwrangler/xfer/retrofiles.h
+    diskwrangler/xfer/transferitem.h)
+add_library(DiskWrangler::Xfer ALIAS diskwrangler-xfer)
+target_link_libraries(diskwrangler-xfer PUBLIC DiskWrangler::Fs)
+
+# The command-line layer (QtCore only): arguments, commands, JSON output, runCli().
+add_library(diskwrangler-cli STATIC
+    diskwrangler/cli/args.cpp
+    diskwrangler/cli/commands.cpp
+    diskwrangler/cli/importer.cpp
+    diskwrangler/cli/output.cpp
+    diskwrangler/cli/args.h
+    diskwrangler/cli/cli.h
+    diskwrangler/cli/importer.h
+    diskwrangler/cli/output.h)
+add_library(DiskWrangler::Cli ALIAS diskwrangler-cli)
+target_link_libraries(diskwrangler-cli PUBLIC DiskWrangler::Xfer)
 
 # Optional filesystem modules (QtCore only): an application links the ones it registers.
 add_library(diskwrangler-dfs STATIC
@@ -89,7 +113,6 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/handoffdialog.cpp
     diskwrangler/ui/licences.cpp
     diskwrangler/ui/viewerdialog.cpp
-    diskwrangler/xfer/retrofiles.cpp
     diskwrangler/app/appsettings.h
     diskwrangler/app/fileopen.h
     diskwrangler/app/handoff.h
@@ -101,14 +124,10 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/licences.h
     diskwrangler/ui/treecolumns.h
     diskwrangler/ui/uihelpers.h
-    diskwrangler/ui/viewerdialog.h
-    diskwrangler/xfer/hostname.h
-    diskwrangler/xfer/mime.h
-    diskwrangler/xfer/retrofiles.h
-    diskwrangler/xfer/transferitem.h)
+    diskwrangler/ui/viewerdialog.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device DiskWrangler::Fs Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device DiskWrangler::Fs DiskWrangler::Xfer Qt${QT_VERSION_MAJOR}::Widgets)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
@@ -125,6 +144,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_executable(moduletest tests/moduletest.cpp)
     target_link_libraries(moduletest DiskWrangler::Dfs DiskWrangler::Fat)
     add_test(NAME moduletest COMMAND moduletest)
+    add_executable(clitest tests/clitest.cpp)
+    target_link_libraries(clitest DiskWrangler::Cli DiskWrangler::Fat)
+    add_test(NAME clitest COMMAND clitest)
     foreach(t uitest xfertest)
         add_executable(${t} tests/${t}.cpp)
         target_link_libraries(${t} DiskWrangler::Core)

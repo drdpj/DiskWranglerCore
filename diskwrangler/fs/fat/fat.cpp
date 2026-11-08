@@ -17,6 +17,8 @@
  */
 #include "fat.h"
 
+#include <diskwrangler/app/clock.h>
+
 #include <cstring>
 
 
@@ -35,7 +37,7 @@ static bool dosChar(QChar c) {
 }
 
 static void nowStamp(quint16 *date, quint16 *time) {
-    QDateTime n = QDateTime::currentDateTime();
+    QDateTime n = dw::now();
     int y = qBound(1980, n.date().year(), 2107);
     *date = quint16(((y - 1980) << 9) | (n.date().month() << 5) | n.date().day());
     *time = quint16((n.time().hour() << 11) | (n.time().minute() << 5) | (n.time().second() / 2));

@@ -52,6 +52,9 @@ public:
     fs::AttrValues volumeValues() const override;
     const fs::NameRules &names() const override { return m_names; }
     fs::VolumeInfo info() const override;
+    // "A.PROG" or "PROG" (= "$.PROG"); "", "/" and "$" are the root. displayPath: "$.PROG", the root "$".
+    bool parsePath(const QString &text, fs::Path *out, QString *err) const override;
+    QString displayPath(const fs::Path &p) const override;
 
     bool list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const override;
     bool read(const fs::Path &file, QByteArray *out, QString *err) const override;

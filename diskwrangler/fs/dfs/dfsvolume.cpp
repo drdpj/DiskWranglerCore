@@ -90,6 +90,27 @@ fs::VolumeInfo Volume::info() const {
     return i;
 }
 
+bool Volume::parsePath(const QString &text, fs::Path *out, QString *err) const {
+    const QString t = text.trimmed();
+    *out = fs::Path();
+    if (t.isEmpty() || t == "/" || t == "$") return true;
+    if (t.contains('/')) { if (err) *err = "a DFS path is D.NAME or NAME, with no '/'"; return false; }
+    QChar d;
+    QString n;
+    splitName(t, &d, &n);
+    if (n.isEmpty()) { if (err) *err = "a DFS name is missing after the directory letter: " + t; return false; }
+    out->parts << QString(d) + "." + n;
+    return true;
+}
+
+QString Volume::displayPath(const fs::Path &p) const {
+    if (p.isRoot()) return "$";
+    QChar d;
+    QString n;
+    splitName(p.parts[0], &d, &n);
+    return QString(d) + "." + n;
+}
+
 bool Volume::list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const {
     if (!dir.isRoot()) { *err = "DFS has no directories"; return false; }
     out->clear();

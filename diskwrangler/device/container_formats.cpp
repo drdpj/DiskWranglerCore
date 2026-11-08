@@ -21,6 +21,8 @@
 
 #include <QDateTime>
 
+#include <diskwrangler/app/clock.h>
+
 namespace dw {
 namespace device {
 
@@ -104,7 +106,7 @@ bool Container::writeImd(QByteArray *out, QString *err) const {
     if (m_kind == Kind::Imd && !m_file.isEmpty()) {
         o = m_file.left(m_file.indexOf(char(0x1A)) + 1);       // header and comment exactly as they were
     } else {
-        QDateTime now = QDateTime::currentDateTime();
+        QDateTime now = dw::now();
         o = "IMD 1.18: " + now.toString("dd/MM/yyyy HH:mm:ss").toLatin1() + "\r\n";
         if (!m_comment.isEmpty()) o += m_comment.toLatin1().replace("\n", "\r\n") + "\r\n";
         o += char(0x1A);
