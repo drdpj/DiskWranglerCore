@@ -75,6 +75,29 @@ With Qt's official Qt 6 (the [online installer](https://www.qt.io/download-qt-in
 
 For Qt 5, use Homebrew's `qt@5` (Apple Silicon only, and Homebrew drops it in May 2027) and `QT=5`.
 
+## The console programs
+Each program has a console program beside it, built from the same code: `acorndw` (`acorndw.pro`) and `cpmdw`
+(`cpmdw.pro`). They need only QtCore, so they run without a display. Build one like the program, from its own
+`.pro`, in a folder of its own:
+
+    mkdir build-cli && cd build-cli && qmake6 ../acorndw.pro && make     # CMake builds it with the program
+
+`make install` (or `cmake --install`) puts it in `bin/` beside the program (CMake on macOS: inside the program's bundle). What the commands do is in
+[cli.md](cli.md).
+
+`core/ci/build.sh` takes the `.pro` whose name ends in `dw.pro` as the console program and the other one as the
+program, builds the console program in `build-cli/`, and ships it in every package:
+
+| Package | Where the console program is |
+|---|---|
+| Windows `.zip` and installer | `<tool>.exe` beside the program's `.exe` (it uses the Qt DLLs already there) |
+| macOS `.dmg` | inside the bundle, `<App>.app/Contents/MacOS/<tool>`; to use it from a terminal, link it onto your `PATH`, e.g. `ln -s "/Applications/<App>.app/Contents/MacOS/acorndw" /usr/local/bin/acorndw` |
+| Linux AppImage | in the AppImage's `usr/bin`. A custom AppRun (`core/ci/AppRun.in`) starts it when the AppImage is started under the console program's name, so make a symlink: `ln -s ~/Applications/<App>.AppImage ~/.local/bin/acorndw` |
+| `.deb` | `/usr/bin/<tool>` (`core/ci/make-deb.sh` with `CLI=<tool>`) |
+
+The workflows build and run each program's golden-image tests for the console program on Linux (`tests/cli/`), and
+check on macOS and Windows that it starts.
+
 ## Release builds
 `.github/workflows/build.yml` builds Windows, macOS and Linux packages on GitHub:
 
