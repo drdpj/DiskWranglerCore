@@ -1091,7 +1091,7 @@ QString usageText(const AppInfo &app, const QVector<CmdDef> &t) {
     QString s = QString("usage: %1 [GLOBAL OPTIONS] COMMAND [OPTIONS] ARGS...\n\ncommands:\n").arg(app.tool);
     for (const CmdDef &d : t) s += QString("  %1 %2\n      %3\n").arg(d.name, d.synopsis, d.summary);
     s += "\nglobal options: --json --dry-run --vol=NAME --fs=ID --backup -q --help --version";
-    for (const QString &o : {"sides", "diskdefs", "charset"}) if (app.options.contains(o)) s += " --" + o + "=...";
+    for (const char *o : {"sides", "diskdefs", "charset"}) if (app.options.contains(QString::fromLatin1(o))) s += QString(" --") + o + "=...";
     s += " -f|--format=NAME\nSee docs/cli.md in DiskWranglerCore for the full reference.\n";
     return s;
 }
@@ -1161,7 +1161,7 @@ bool cmdScript(Ctx &c, const Parsed &, const QStringList &pos, Result *res, cons
     QByteArray text;
     if (pos.isEmpty() || pos[0] == "-") {
         QFile in;
-        in.open(stdin, QIODevice::ReadOnly);
+        if (!in.open(stdin, QIODevice::ReadOnly)) { c.fail(ExitFailed, QString("cannot read standard input: %1").arg(in.errorString())); return false; }
         text = in.readAll();
     } else {
         QFile f(pos[0]);
