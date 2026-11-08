@@ -80,8 +80,7 @@ LetterPlace placeLetter(QChar letter, const QString &name, bool flatten, const s
     LetterPlace p;
     p.name = name;
     if (flatten || letter == '$') return p;
-    const QChar l = letter.toUpper();
-    if (canName ? !canName(l) : QString("^@&*#\"").contains(l)) {
+    if (canName ? !canName(letter) : QString("^@&*#\"").contains(letter)) {
         p.how = LetterPlace::Flat;
         p.name = "X_" + name;
         p.warning = QString("%1.%2: ADFS can't have a directory called '%1', so it was copied as %3")
@@ -89,7 +88,7 @@ LetterPlace placeLetter(QChar letter, const QString &name, bool flatten, const s
         return p;
     }
     p.how = LetterPlace::Subdir;
-    p.subdir = QString(l);
+    p.subdir = QString(letter);      // case kept: ADFS names are case-insensitive but keep their case
     return p;
 }
 

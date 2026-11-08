@@ -95,13 +95,14 @@ bool isCpmFence(const QByteArray &first512);           // one file, $.CPMDISC
 
 // ----- copying DFS files to a filesystem with directories (ADFS)
 // What a directory letter becomes there (docs/design.md, "DFS directory letters"): $ is the target directory itself;
-// another letter a subdirectory of the target named after it (made on demand), so *RUN A.PROG still finds it; the
+// another letter a subdirectory of the target named after it, in the letter's own case (made on demand, or an
+// existing one of either case reused, as ADFS names are case-insensitive), so *RUN A.PROG still finds it; the
 // letters ADFS can't have in a name (^ @ & * # ", from the ADFS 2.10 ROM) give a flat "X_NAME" in the target
 // directory, with a warning. Flattened (the "flatten" setting): every file goes in the target directory as NAME.
 // canName: whether the target filesystem allows the letter as a name (by default the ROM's rule above).
 struct LetterPlace {
     enum How { Target, Subdir, Flat } how = Target;
-    QString subdir;                  // Subdir: the directory's name (the letter, upper case)
+    QString subdir;                  // Subdir: the directory's name (the letter, its case kept)
     QString name;                    // the file's name there
     QString warning;                 // Flat: what to tell the user
 };

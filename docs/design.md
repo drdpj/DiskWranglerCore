@@ -336,6 +336,8 @@ Decided: inside a DFS volume the letter is an attribute on a flat list (`A.BOOT`
 | FAT, CP/M | `NAME` | `A_NAME` or dropped, by option | No equivalent; lowest priority |
 
 - **Default and option.** "DFS directories become ADFS directories" is on by default, a remembered setting with a "flatten" alternative, not a prompt on every copy.
+- **Case.** The subdirectory keeps the letter's case (`a.PROG` goes into `a`, not `A`). ADFS names are case-insensitive, so an existing `A` is reused for `a.PROG` rather than a second directory made.
+- **Via the host.** Host files that came from DFS carry the letter in their `.inf` (`A.NAME`), and adding them to ADFS places them by the same rule and the same setting, so DFS → host → ADFS gives what DFS → ADFS gives. Without an `.inf` (or with reading them turned off) a host name is just a name.
 - **Round trip.** The existing `letterPolicy` (single-letter ADFS directory → DFS letter) is the reverse mapping. A test copies DFS → ADFS → DFS and expects the original catalogue back.
 - **Letters ADFS can't take as directory names.** From the ROMs (ADFS 2.10, DFS 2.45): DFS 2.45 accepts any printable character as a directory letter apart from `:` and `.` (filename parser at &8103). ADFS 2.10 rejects `DEL ^ @ : $ &` inside a name component (table at &8B2D), ends a component at `.`, `"` or a control character (&8525), and refuses the wildcards `*` and `#` when creating (&8B02). So `$` maps to the target directory itself, and the letters `^ @ & * # "` fall back to a flat `X_NAME` in the target directory with a warning in the import summary.
 - **Whole-disc copy.** A later DFS-to-ADFS disc copy (for hard discs and BeebSCSI) uses the same mapping.
