@@ -185,7 +185,7 @@ int main(int argc, char **argv) {
         dfs::LetterPlace p = dfs::placeLetter('$', "BOOT");
         CHECK(p.how == dfs::LetterPlace::Target && p.name == "BOOT", "$ goes in the target directory");
         p = dfs::placeLetter('a', "PROG");
-        CHECK(p.how == dfs::LetterPlace::Subdir && p.subdir == "A" && p.name == "PROG", "a letter: a subdirectory, upper case");
+        CHECK(p.how == dfs::LetterPlace::Subdir && p.subdir == "a" && p.name == "PROG", "a letter: a subdirectory, its case kept");
         p = dfs::placeLetter('^', "PROG");
         CHECK(p.how == dfs::LetterPlace::Flat && p.name == "X_PROG" && !p.warning.isEmpty(), "^: X_NAME with a warning");
         p = dfs::placeLetter('A', "PROG", true);
