@@ -619,3 +619,35 @@ design above:
     alone); starting it has been checked only on Linux by hand, not on Windows or macOS.
 12. **`.pri` files** are each added only once however often they are included (`DW_PRI_DONE`), so a module's
     `.pri` can include the layers it stands on.
+
+## Amendments from step 4b
+
+Step 4b created v0.5.0: the command-line layer (`diskwrangler/cli/`, QtCore only) and the two console programs. See
+`docs/cli.md` for the reference. What turned out different from the design above:
+
+1. **`dw::cli`, not `wcli`**, in `diskwrangler/cli/`: `args` (option parsing), `output` (the JSON pieces), `importer`
+   (put and copy), `commands` (the commands and `runCli`). It needs `diskwrangler-xfer`, which is new: `retrofiles.cpp`
+   was QtCore-only but sat in the widgets build, so `diskwrangler-xfer.pri` / `DiskWrangler::Xfer` now hold it and
+   the widgets core links them.
+2. **`Volume` gained `parsePath`, `displayPath` and `hostNameFor`** (defaults: `/` separated parts; no name), so each
+   filesystem says how its paths are typed and shown. DFS and FAT override the first two.
+3. **The clock.** `dw::now()` (`diskwrangler/app/clock.h`, in the device build) replaces `QDateTime::currentDateTime()`
+   wherever a time is written to a disc; only `runCli` sets it, from `SOURCE_DATE_EPOCH`.
+4. **Clash names follow the GUI** (`NAME~1`), not a digit-replacement scheme: the base is shortened until the volume
+   accepts the name, a FAT extension and a DFS directory letter stay.
+5. **`get` conflicts** use a staging folder, because `writeHost` overwrites silently: the files are written aside and
+   moved in only when no name clashes (or with `--replace`).
+6. **Scripts are validated before they run**: every line is parsed first, so a typo on line 40 doesn't leave 39 lines'
+   work to be abandoned.
+
+7. **`Backend::loadDiskdefs`** (default: succeeds) lets `--diskdefs` reach a backend before `new` or `open` use it;
+   `cpmdw` loads the files, `acorndw` has none.
+8. **`Volume::toRetroIn(dir, entry)`** (default: `toRetro(entry)`) lets a volume describe an item knowing which
+   directory it is in. CP/M needs it: the user number lives in the directory, not in the entry.
+9. **`get` and `copy` of the root** export its entries, not a root item (`exportNode`): `get / out` and `get 0: out`
+   work. For a Namespace volume `hostNameFor` gives `userN`, so `--user-folders` makes `user0`..`user15` folders, and
+   `auto` is resolved in the core: on when the items span more than one user area.
+10. **`info` has a text form** (container, detection with the chosen reading and tier, the other readings, the volumes
+    with free space); `--json` is unchanged.
+11. **A name's own warning** (DFS "ADFS can't have a directory called '@'...") already says which name, so the
+    importer doesn't prefix it again.
