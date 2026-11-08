@@ -33,6 +33,12 @@ rm -rf "$w"
 mkdir -p "$w/root/DEBIAN" "$w/debian"
 make -C "$b" install INSTALL_ROOT="$w/root" >/dev/null
 strip --strip-unneeded "$w/root/usr/bin/$app"
+# the console program (CLI=acorndw / cpmdw), built beside it in <build dir>-cli, goes in /usr/bin too
+cli=${CLI:-}
+if [ -n "$cli" ]; then
+    make -C "$b-cli" install INSTALL_ROOT="$w/root" >/dev/null
+    strip --strip-unneeded "$w/root/usr/bin/$cli"
+fi
 
 # the package's copyright file, and this program's own notices
 doc="$w/root/usr/share/doc/$app"
@@ -66,7 +72,7 @@ printf '%s (%s) unstable; urgency=medium\n\n  * Release %s. Notes:\n    %s/relea
 
 # the library packages, from what the program links to
 printf 'Source: %s\n\nPackage: %s\nArchitecture: any\n' "$app" "$app" > "$w/debian/control"
-depends=$(cd "$w" && dpkg-shlibdeps -O "root/usr/bin/$app" 2>/dev/null | sed -n 's/^shlibs:Depends=//p')
+depends=$(cd "$w" && dpkg-shlibdeps -O "root/usr/bin/$app" ${cli:+"root/usr/bin/$cli"} 2>/dev/null | sed -n 's/^shlibs:Depends=//p')
 [ -n "$depends" ] || { echo "make-deb.sh: dpkg-shlibdeps found no dependencies" >&2; exit 1; }
 # Qt's platform plugins aren't linked to, so dpkg-shlibdeps can't see them: X11 (and XWayland) needs this package
 # for Qt 6 (Qt 5 keeps it in libqt5gui5); the native Wayland plugin is only recommended

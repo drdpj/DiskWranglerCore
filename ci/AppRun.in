@@ -1,0 +1,13 @@
+#!/bin/sh
+# Part of DiskWranglerCore, used by Acorn Disk Wrangler and CP/M Disk Wrangler. GPL v3 or later.
+# The AppImage's AppRun when the program has a console program (core/ci/build.sh makes build/AppRun.custom from this):
+# started as @CLI@ (a symlink to the .AppImage; the runtime sets $ARGV0 to the name it was started under) it runs the
+# console program, otherwise the program. A custom AppRun has to source the hooks linuxdeploy's plugins leave in
+# apprun-hooks/ (the Qt plugin's sets the plugin and library paths); the default AppRun does it for itself.
+HERE=$(dirname "$(readlink -f "$0")")
+export APPDIR=${APPDIR:-$HERE}
+for hook in "$HERE"/apprun-hooks/*.sh; do [ -f "$hook" ] && . "$hook"; done
+case "$(basename "${ARGV0:-$0}")" in
+    @CLI@|@CLI@.*|@CLI@-*) exec "$HERE/usr/bin/@CLI@" "$@" ;;
+esac
+exec "$HERE/usr/bin/@APP@" "$@"
