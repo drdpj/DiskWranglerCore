@@ -67,6 +67,68 @@ format's `id`, which is what `--format` takes. `--stamps` (no value) makes a CP/
 `--label=TEXT` needs it. `get --user-folders=auto` makes `userN` folders only when the items come from more than one
 user area; `put` reads `user0`..`user15` folders as user areas.
 
+### Text output
+
+Text output is for people and is not a stable interface. Scripts use `--json`, whose schema is unchanged. The layouts below are the design for the text output.
+
+#### `ls` text layout
+
+`ls` prints one line per entry, with fields in this order:
+
+    NAME  TYPE  ATTRIBUTES  SIZE  DATE
+
+- **NAME** is the path as the volume writes it (`displayPath`): `0:PIP.COM` on CP/M, `$.Games.Elite` on ADFS. It is left-aligned and padded to the widest name in the listing.
+- **TYPE** is `D` for a directory and blank for a file. The column is left out when the listing has no directories.
+- **ATTRIBUTES** are the volume's file attributes that are set on the entry, one letter each, in the volume's own order. ADFS uses `R` (read), `W` (write), `L` (locked) and `E` (execute only). A directory shows only `L`. CP/M shows `R` for read-only. The column is as wide as the widest entry, and it is left out when no entry has any set.
+- **SIZE** is in bytes, right-aligned, padded to the widest size in the listing. Where the filesystem knows the size only to a record, the size is marked (decision: the marker).
+- **DATE** is `yyyy-MM-dd HH:mm`. It is shown only when the volume keeps dates and the entry has one. The column is left out otherwise.
+
+A column with no value in any entry is left out, so a CP/M listing has no type, attribute or date column. Columns are separated by two spaces.
+
+`--vol=all` prefixes each name with the volume label and `:`.
+
+Without `-R`, `ls` lists only the named directory, or the root when no path is given. `-R` lists every directory below it, depth first. `-d` shows the named node itself.
+
+Example of the CP/M layout (illustrative):
+
+    0:PAUSE.Z8K   13952
+    0:XCON.Z8K    19584
+    0:ZCC.Z8K     17664
+
+Example of the ADFS layout (illustrative):
+
+    $.Games        D             2026-03-02 14:10
+    $.Games.Elite    RWLE 20480  2026-03-02 14:12
+
+Decision: a header before the listing giving the volume's label, title, used and free space, and whether it is read-only. Decision: whether `-R` repeats the header for each volume. Decision: sort order, by name with directories first or mixed.
+
+#### `info` text layout
+
+`info` prints these sections, in this order:
+
+1. **Container**: `container: <kind>, <size> bytes`, with `, read-only` when the file cannot be written.
+2. **Format** (CP/M): `format: <name> (<origin>)`, then the format summary. The origin is `library`, `cpmtools` or `detected`.
+3. **Reading**: `reading: <confidence>, safe to write` or `reading: <confidence>, read-only`, followed by the reason in one sentence.
+4. **Definition**, only when the format is not in the library: the diskdefs text from `Format::toDiskdef()`, indented, with the instruction below it.
+5. **Volumes**: one block per mount, showing the label, fsId, used and free space.
+
+For a format not in the library, the instruction is: "Save this definition to a file, give it a name, and pass `--diskdefs=FILE --format=NAME` with each command that changes the disc." A library format needs only `--format=NAME`.
+
+#### Read-only messages
+
+A disc is read-only when its format is not confirmed. Writes to it fail with exit 6, and the message says what to pass:
+
+- Library format: `read-only: the format is not confirmed; use --format=NAME`, where NAME is the name `info` reports.
+- Format not in the library: `read-only: the format is not in the library; see the definition under info`.
+
+Read commands work without `--format`. Only commands that change the disc need it.
+
+#### Wording
+
+Detection texts say what was found and whether changes are safe, without menu names. Each front end adds its own instruction: the GUI adds the path to Tools > Disc format, and the CLI adds the `--format` or `--diskdefs` instruction above. Menu names must not appear in CLI output.
+
+The CLI reads no QSettings, so a format confirmed in the GUI is not remembered. Each command that changes such a disc has to name the format.
+
 ## One invocation, one transaction
 
 A run opens the image, applies its operations as one transaction and saves once, through the same checked copy, read
