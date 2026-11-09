@@ -69,65 +69,133 @@ user area; `put` reads `user0`..`user15` folders as user areas.
 
 ### Text output
 
-Text output is for people and is not a stable interface. Scripts use `--json`, whose schema is unchanged. The layouts below are the design for the text output.
+Text output is for people and is not a stable interface: scripts use `--json`. The JSON keeps every existing field
+as it is; the changes below add fields and change only the wording of messages and of CP/M's `why`. Text output is
+plain ASCII and is left out with `-q`.
 
 #### `ls` text layout
 
-`ls` prints one line per entry, with fields in this order:
+Each volume listed starts with a header line:
+
+    VOL: LABEL "TITLE", USED used, FREE free[, read-only]
+
+VOL is the volume's name (what `--vol` takes: `adfs`, `dos`, `side0`, `cpm`), LABEL its label, USED and FREE in
+bytes. `"TITLE"` is left out when the volume has no title or it is empty; `, read-only` is added when the volume
+can't be written, for whatever reason. There is one header per volume (so `--vol=all` gives one per volume), not one
+per directory under `-R`. `-d` prints no header.
+
+Then one line per entry, with the fields in this order:
 
     NAME  TYPE  ATTRIBUTES  SIZE  DATE
 
-- **NAME** is the path as the volume writes it (`displayPath`): `0:PIP.COM` on CP/M, `$.Games.Elite` on ADFS. It is left-aligned and padded to the widest name in the listing.
+- **NAME** is the path as the volume writes it (`displayPath`): `0:PIP.COM` on CP/M, `$.Games.Elite` on ADFS. It is
+  left-aligned and padded to the widest name in the listing. With `--vol=all` it starts with the volume's name and
+  `:` (`adfs:$.Games`, `cpm:0:PIP.COM`), the name `--vol` takes (as in the `vol` of each JSON entry), not the label.
 - **TYPE** is `D` for a directory and blank for a file. The column is left out when the listing has no directories.
-- **ATTRIBUTES** are the volume's file attributes that are set on the entry, one letter each, in the volume's own order. ADFS uses `R` (read), `W` (write), `L` (locked) and `E` (execute only). A directory shows only `L`. CP/M shows `R` for read-only. The column is as wide as the widest entry, and it is left out when no entry has any set.
-- **SIZE** is in bytes, right-aligned, padded to the widest size in the listing. Where the filesystem knows the size only to a record, the size is marked (decision: the marker).
-- **DATE** is `yyyy-MM-dd HH:mm`. It is shown only when the volume keeps dates and the entry has one. The column is left out otherwise.
+  (CP/M user areas are not entries in a listing: their files are listed with the user number in the name.)
+- **ATTRIBUTES** are the yes/no file attributes set on the entry, one letter each, in a fixed order per filesystem:
+  ADFS `L` (locked), `W` (write), `R` (read), `E` (execute only), the order `*INFO` and the `.inf` access string use,
+  so a plain file shows `WR` and a locked one `LWR`; a directory shows only `L`. CP/M `R` (read-only), `S` (system),
+  `A` (archive); F1-F4 are not shown (see `attr`). DFS `L`. FAT `R` (read-only), `H` (hidden), `S` (system), `A`
+  (archive). The letters come from each attribute's `AttrSpec` (a new one-letter field, not the `sample` width hint),
+  only for attributes shown as list columns (`column`), in the order the volume lists its attributes, except where a
+  volume overrides that order (ADFS lists them R W L E, so it overrides to L W R E; its spec order, and with it JSON's
+  `fileAttrSpecs`, stays as it is). The column is as wide as the widest entry, and it is left out when no entry has
+  any set.
+- **SIZE** is in bytes, right-aligned, padded to the widest size in the listing. A directory's is blank. Where the
+  filesystem knows the size only to a record (`sizeExact` false: a CP/M file with no exact byte count), it is shown
+  with `~` before it (`~1536`); the `~` counts in the width, so the numbers still line up on the right.
+- **DATE** is `yyyy-MM-dd HH:mm`. It is shown only when the entry has one (an ADFS file whose load and exec addresses
+  carry a date stamp, a FAT file, a CP/M 3 file on a disc with time stamps). The column is left out when no entry has
+  one.
 
-A column with no value in any entry is left out, so a CP/M listing has no type, attribute or date column. Columns are separated by two spaces.
+A column with no value in any entry is left out, so a plain CP/M listing has only names and sizes. Columns are
+separated by two spaces, and trailing spaces are trimmed.
 
-`--vol=all` prefixes each name with the volume label and `:`.
+Without `-R`, `ls` lists only the named directory, or the root when no path is given. `-R` lists every directory below
+it, depth first, each directory followed by its contents. `-d` shows the named node itself.
 
-Without `-R`, `ls` lists only the named directory, or the root when no path is given. `-R` lists every directory below it, depth first. `-d` shows the named node itself.
+Entries are sorted by name, ignoring case, with directories and files mixed (as `*CAT` does); on CP/M by user number,
+then name. Under `-R` the sort applies within each directory. JSON keeps the order in which the volume lists them.
 
 Example of the CP/M layout (illustrative):
 
+    cpm: CP/M, 39936 used, 206848 free
     0:PAUSE.Z8K   13952
     0:XCON.Z8K    19584
     0:ZCC.Z8K     17664
+    3:NOTES.TXT  ~1536
 
 Example of the ADFS layout (illustrative):
 
-    $.Games        D             2026-03-02 14:10
-    $.Games.Elite    RWLE 20480  2026-03-02 14:12
-
-Decision: a header before the listing giving the volume's label, title, used and free space, and whether it is read-only. Decision: whether `-R` repeats the header for each volume. Decision: sort order, by name with directories first or mixed.
+    adfs: ADFS "Games", 27648 used, 627712 free
+    $.Games        D  L
+    $.Games.Elite     WR  20480  2026-03-02 14:12
 
 #### `info` text layout
 
 `info` prints these sections, in this order:
 
-1. **Container**: `container: <kind>, <size> bytes`, with `, read-only` when the file cannot be written.
-2. **Format** (CP/M): `format: <name> (<origin>)`, then the format summary. The origin is `library`, `cpmtools` or `detected`.
-3. **Reading**: `reading: <confidence>, safe to write` or `reading: <confidence>, read-only`, followed by the reason in one sentence.
-4. **Definition**, only when the format is not in the library: the diskdefs text from `Format::toDiskdef()`, indented, with the instruction below it.
-5. **Volumes**: one block per mount, showing the label, fsId, used and free space.
+1. **Container**: `container: <kind>, <size> bytes`, with `, read-only` when the file can't be written (TeleDisk, or
+   a file without write permission).
+2. **Detection**: `detection: <verdict>: <description> (<tier>)`, the chosen reading's notes indented below it, then
+   one indented `also: <description> (<tier>)` line for each other reading. The other readings are what `--fs=ID`
+   chooses between after exit 8, so they stay in the text.
+3. **Format**, by program:
+   - `cpmdw`: `format: <name> (<origin>)`, then the format summary indented. The origin is what the format library
+     records: `built-in` or `cpmtools` (the two parts of the library), the path of a `--diskdefs` file, or `detected`
+     (a layout worked out from the disc, in no library).
+   - `acorndw`: `sides: <order>, <how>` for a double-sided image, where `<order>` is `interleaved` or `sequential`
+     and `<how>` is `detected`, `assumed` (couldn't be detected, so the format's default) or `forced` (`--sides`).
+     Nothing for a single-sided image.
+4. **Reading**: `reading: <confidence>, safe to write` or `reading: <confidence>, read-only`, followed by the reason
+   in one sentence, indented, then the instruction (see Read-only messages) when it is read-only. `<confidence>` is
+   CP/M's `high`, `medium`, `low` or `none`; `acorndw` uses the chosen reading's tier (`certain`, `likely`,
+   `possible`).
+5. **Definition** (`cpmdw`), only when the reading's layout is not in the library (`fromLibrary` false): the diskdefs
+   text from `Format::toDiskdef()`, indented, with the instruction below it.
+6. **Volumes**: one block per mount: `volume <name>: <label> (<fsId>)`, with `, read-only` and the reason when it
+   can't be written; then `title: "<title>"` when it has one; then `<used> used, <free> free, <total> bytes`.
 
-For a format not in the library, the instruction is: "Save this definition to a file, give it a name, and pass `--diskdefs=FILE --format=NAME` with each command that changes the disc." A library format needs only `--format=NAME`.
+For a layout not in the library, the instruction is: "Save this definition to a file, give it a name, and pass
+`--diskdefs=FILE --format=NAME` with each command that changes the disc." For a library format the instruction is
+`--format=NAME`; for a format from a `--diskdefs` file, `--diskdefs=FILE --format=NAME`, because the file is read only
+in runs that name it.
+
+JSON gains, in `info`'s `app` for `cpmdw`: `format.diskdef` (the `toDiskdef()` text, always) and `fromLibrary`
+(bool). Nothing else is added.
 
 #### Read-only messages
 
-A disc is read-only when its format is not confirmed. Writes to it fail with exit 6, and the message says what to pass:
+Every refused write exits 6 (unsupported) with a message `read-only: <reason>`, where the reason says what to do. The
+reasons:
 
-- Library format: `read-only: the format is not confirmed; use --format=NAME`, where NAME is the name `info` reports.
-- Format not in the library: `read-only: the format is not in the library; see the definition under info`.
+- `cpmdw`, format not confirmed, layout in the library: `read-only: the format is not confirmed; use --format=NAME`
+  (or `--diskdefs=FILE --format=NAME` for a format that came from a diskdefs file), NAME being the name `info`
+  reports. A blank disc made by `new` is in this case: its empty directory can't tell formats of the same shape
+  apart, so every command that changes it names the format (see above).
+- `cpmdw`, format not confirmed, layout not in the library: `read-only: the format is not in the library; see the
+  definition under info`.
+- TeleDisk: `read-only: TeleDisk files can't be written; use convert to make a writable copy`.
+- The image file can't be written: `read-only: the image file can't be written`.
+- A volume the disc mounts read-only: `read-only: <volume name>: <the volume's reason>`.
 
-Read commands work without `--format`. Only commands that change the disc need it.
+A disc whose check finds errors is a different case: a command that would change it exits 4 (check),
+`<volume name> has errors (see check), so nothing was changed`.
+
+Read commands (`info`, `check`, `ls`, `get`, `attr` without `--set`, `title` and `boot` without a value) work on a
+read-only disc without `--format`. Only commands that change the disc need it.
 
 #### Wording
 
-Detection texts say what was found and whether changes are safe, without menu names. Each front end adds its own instruction: the GUI adds the path to Tools > Disc format, and the CLI adds the `--format` or `--diskdefs` instruction above. Menu names must not appear in CLI output.
+Detection texts say what was found and whether changes are safe, without menu names. Each front end adds its own
+instruction: the GUI the path to Tools > Disc format (or Tools > Check disc), the CLI the `--format` or `--diskdefs`
+instruction above (or `check`). Menu names must not appear in CLI output, text or JSON. For `cpmdw` this means the
+detection result carries the instruction as a kind (choose a format, confirm the format, two-byte block pointers, see
+the check) beside `why`, and each front end turns the kind into its own words; `why` in JSON is the finding only.
 
-The CLI reads no QSettings, so a format confirmed in the GUI is not remembered. Each command that changes such a disc has to name the format.
+The CLI reads no QSettings, so a format confirmed in the GUI is not remembered. Each command that changes such a disc
+has to name the format.
 
 ## One invocation, one transaction
 
@@ -164,9 +232,9 @@ A unix-style `get -` can't be combined with `--json`.
 | 1 | failed | The operation failed (disc full, bad name, unreadable file) |
 | 2 | usage | Wrong arguments |
 | 3 | not-found | The image, a path on it, or a host file isn't there |
-| 4 | check | The disc fails its check, so nothing was written |
+| 4 | check | The disc fails its check, so nothing was written (`check`, or a change to a disc with errors) |
 | 5 | conflict | A name exists and neither `--replace` nor `--skip` was given |
-| 6 | unsupported | The filesystem or container can't do that (a move between FAT directories; TeleDisk can't be written) |
+| 6 | unsupported | The filesystem or container can't do that (a move between FAT directories), or the disc is read-only (TeleDisk, a CP/M format not confirmed): see Read-only messages |
 | 7 | foreign | The disc belongs to the other Wrangler (`info` names it; the program never launches it) |
 | 8 | ambiguous | Two readings are equally likely: say `--fs=ID` |
 | 9 | unrecognised | Nothing recognised the disc (`--fs=ID` tries a reading anyway) |
