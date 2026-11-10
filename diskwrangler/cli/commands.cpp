@@ -29,6 +29,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QUuid>
+#include <algorithm>
 #include <cstdio>
 
 #include <diskwrangler/app/clock.h>
@@ -180,6 +181,33 @@ struct VolRef {
     QString why;
 };
 
+// Why a mount can't be written, if it can't (docs/cli.md, "Read-only messages"), in the order the reasons are tried:
+// the whole image (cpmdw: the format isn't confirmed), the container (TeleDisk), the image file, then the mount's own (resolveVol tries the check before that last one).
+// `why` is empty when nothing stops a write. `ofVolume` is true only for the mount's own reason, which a message
+// names the volume for; the others are about the whole image.
+struct WriteBlock {
+    QString why;
+    bool ofVolume = false;
+    bool blocked() const { return !why.isEmpty() || ofVolume; }
+};
+
+WriteBlock writeBlock(OpenedImage *img, int mount, bool withMount = true) {
+    WriteBlock w;
+    const fs::Disc::Mount &m = img->disc().mounts()[mount];
+    const QString whole = img->readOnlyWhy();
+    device::Container *k = img->disc().container();
+    if (!whole.isEmpty()) w.why = whole;
+    else if (k && k->readOnlyContainer()) w.why = "TeleDisk files can't be written; use convert to make a writable copy";
+    else if (k && !k->path().isEmpty() && !QFileInfo(k->path()).isWritable()) w.why = "the image file can't be written";
+    else if (withMount && m.readOnly) { w.why = m.readOnlyWhy; w.ofVolume = true; }
+    return w;
+}
+
+// The text after "read-only: " for a refused write.
+QString readOnlyReason(OpenedImage *img, int mount, const WriteBlock &w) {
+    return w.ofVolume ? (w.why.isEmpty() ? img->volName(mount) : img->volName(mount) + ": " + w.why) : w.why;
+}
+
 bool resolveVol(Ctx &c, OpenedImage *img, const QString &opt, bool forWrite, VolRef *out) {
     QString err;
     const int i = pickMount(c, img, opt, forWrite, &err);
@@ -193,12 +221,14 @@ bool resolveVol(Ctx &c, OpenedImage *img, const QString &opt, bool forWrite, Vol
     out->why = m.readOnlyWhy;
     if (!c.volSet) { c.volLabel = m.label; c.volSet = true; }
     if (forWrite) {
-        if (m.readOnly) { c.fail(ExitUnsupported, QString("%1 is read-only%2").arg(m.label, m.readOnlyWhy.isEmpty() ? QString() : ": " + m.readOnlyWhy)); return false; }
-        device::Container *k = img->disc().container();
-        if (k && k->readOnlyContainer()) { c.fail(ExitUnsupported, "this container (TeleDisk) is read-only: use convert to make a writable copy"); return false; }
-        if (k && !k->writable()) { c.fail(ExitUnsupported, "the image is read-only"); return false; }
+        // the whole image first, then the check (a disc with errors is exit 4 even where the volume is read-only
+        // because of them), then the volume's own reason
+        const WriteBlock w = writeBlock(img, i, false);
+        if (w.blocked()) { c.fail(ExitUnsupported, "read-only: " + readOnlyReason(img, i, w)); return false; }
         if (!c.checked.contains(i)) c.checked[i] = m.vol->check().ok();
-        if (!c.checked[i]) { c.fail(ExitUnsupported, QString("%1 has errors (see check), so it is read-only").arg(m.label)); return false; }
+        if (!c.checked[i]) { c.fail(ExitCheck, QString("%1 has errors (see check), so nothing was changed").arg(out->name)); return false; }
+        const WriteBlock wv = writeBlock(img, i);
+        if (wv.blocked()) { c.fail(ExitUnsupported, "read-only: " + readOnlyReason(img, i, wv)); return false; }
     }
     return true;
 }
@@ -326,11 +356,22 @@ bool exportNode(Ctx &c, const VolRef &r, const Path &p, QVector<TransferItem> *o
     return true;
 }
 
+// The attribute letters of an entry for a text listing: each yes/no attribute that is a list column, has a letter and
+// is set on the entry, in the volume's letter order (the order of its specs unless it says otherwise).
 QString attrSummary(const VolRef &r, const fs::Entry &e) {
+    QVector<fs::AttrSpec> specs = r.v->fileAttrs();
+    const QStringList order = r.v->attrLetterOrder();
+    if (!order.isEmpty()) {
+        QVector<fs::AttrSpec> sorted;
+        for (const QString &k : order)
+            for (const fs::AttrSpec &a : specs) if (a.key == k) sorted << a;
+        for (const fs::AttrSpec &a : specs) if (!order.contains(a.key)) sorted << a;
+        specs = sorted;
+    }
     QString s;
-    for (const fs::AttrSpec &a : r.v->fileAttrs())
-        if (a.type == fs::AttrSpec::Bool && e.attrs.value(a.key).toBool() && (!e.isDir() || a.dirs))
-            s += a.sample.isEmpty() ? a.key.left(1).toUpper() : a.sample.left(1);
+    for (const fs::AttrSpec &a : specs)
+        if (a.type == fs::AttrSpec::Bool && a.column && !a.letter.isEmpty() && e.attrs.value(a.key).toBool() && (!e.isDir() || a.dirs))
+            s += a.letter;
     return s;
 }
 
@@ -383,28 +424,76 @@ void fillInfo(Ctx &c, const Parsed &p, Result *res) {
     *res = r;
 }
 
+// info as text (docs/cli.md, "info text layout"), made from the JSON fillInfo built: the container, the detection, the
+// format (cpmdw) or side order (acorndw), the reading, the definition (cpmdw, a layout not in the library) and the
+// volumes. A disc that could not be opened has only the first two: what was found, and the other readings --fs chooses
+// between.
+void infoText(Ctx &c, const Result &res) {
+    const QJsonObject k = res["container"].toObject(), ch = res["chosen"].toObject(), app = res["app"].toObject();
+    auto line = [](const QString &s) { printf("%s\n", qPrintable(s)); };
+    auto indented = [&](const QString &s, int n = 2) { line(QString(n, ' ') + s); };
+
+    if (!k.isEmpty()) {
+        device::Container *ct = c.img ? c.img->disc().container() : nullptr;
+        const bool ro = k["readOnly"].toBool() || !QFileInfo(c.imagePath).isWritable() || (ct && !ct->writable());
+        line(QString("container: %1, %2 bytes%3").arg(k["kind"].toString()).arg(qint64(k["size"].toDouble())).arg(ro ? ", read-only" : ""));
+    }
+
+    QString detection = "detection: " + res["verdict"].toString();
+    if (!ch.isEmpty()) detection += QString(": %1 (%2)").arg(ch["description"].toString(), ch["tier"].toString());
+    line(detection);
+    QStringList notes;
+    for (const QJsonValue &n : ch["notes"].toArray()) if (!n.toString().isEmpty()) { notes << n.toString(); indented(n.toString()); }
+    const QJsonArray cands = res["candidates"].toArray();
+    for (int i = 0; i < cands.size(); ++i) {
+        if (i == c.outcome.chosen) continue;
+        const QJsonObject o = cands[i].toObject();
+        indented(QString("also: %1 (%2)").arg(o["description"].toString(), o["tier"].toString()));
+    }
+    if (!c.img) return;
+
+    const QJsonObject fmt = app["format"].toObject(), sides = app["sides"].toObject();
+    if (!fmt.isEmpty()) {
+        line(QString("format: %1 (%2)").arg(fmt["name"].toString(), fmt["origin"].toString()));
+        if (!fmt["summary"].toString().isEmpty()) indented(fmt["summary"].toString());
+    } else if (sides["doubleSided"].toBool()) {
+        line(QString("sides: %1, %2").arg(sides["order"].toString(), sides["forced"].toBool() ? "forced" : sides["confirmed"].toBool() ? "detected" : "assumed"));
+    }
+
+    // cpmdw reports its own confidence and the reason for it; acorndw's reading is the chosen candidate's tier
+    const bool own = app.contains("confidence");
+    const QString confidence = own ? app["confidence"].toString() : ch["tier"].toString();
+    const bool safe = own ? app["safeToWrite"].toBool() : ch.value("safeToWrite").toBool(true);
+    line(QString("reading: %1, %2").arg(confidence, safe ? "safe to write" : "read-only"));
+    const QString why = own ? app["why"].toString() : QString();
+    if (!why.isEmpty() && !notes.contains(why)) indented(why);            // (cpmdw's candidate notes already say it)
+    if (!safe && !c.img->readOnlyWhy().isEmpty()) indented(c.img->readOnlyWhy());
+
+    if (app.contains("fromLibrary") && !app["fromLibrary"].toBool() && !fmt["diskdef"].toString().isEmpty()) {
+        line("definition:");
+        for (const QString &l : fmt["diskdef"].toString().split('\n')) indented(l);
+        indented("Save this definition to a file, give it a name, and pass --diskdefs=FILE --format=NAME with each command that changes the disc.");
+    }
+
+    for (const QJsonValue &v : res["volumes"].toArray()) {
+        const QJsonObject o = v.toObject(), i = o["info"].toObject();
+        QString head = QString("volume %1: %2 (%3)").arg(o["vol"].toString(), o["label"].toString(), o["fsId"].toString());
+        for (int m = 0; m < c.img->disc().mounts().size(); ++m) {
+            if (c.img->volName(m) != o["vol"].toString()) continue;
+            const WriteBlock w = writeBlock(c.img.get(), m);
+            if (w.blocked()) head += w.why.isEmpty() ? ", read-only" : ", read-only: " + w.why;
+        }
+        line(head);
+        if (!i["title"].toString().isEmpty()) indented(QString("title: \"%1\"").arg(i["title"].toString()));
+        const qint64 total = qint64(i["total"].toDouble()), free = qint64(i["free"].toDouble());
+        indented(QString("%1 used, %2 free, %3 bytes").arg(total - free).arg(free).arg(total));
+    }
+}
+
 bool cmdInfo(Ctx &c, const Parsed &p, const QStringList &, Result *res) {
     fillInfo(c, p, res);
     if (c.err.failed()) return false;
-    if (!c.g.json && !c.g.quiet) {
-        const QJsonObject k = (*res)["container"].toObject(), ch = (*res)["chosen"].toObject();
-        printf("container: %s, %lld bytes%s\n", qPrintable(k["name"].toString()), qint64(k["size"].toDouble()), k["readOnly"].toBool() ? ", read-only" : "");
-        printf("detection: %s", qPrintable((*res)["verdict"].toString()));
-        if (!ch.isEmpty()) printf(": %s (%s)", qPrintable(ch["description"].toString()), qPrintable(ch["tier"].toString()));
-        printf("\n");
-        for (const QJsonValue &n : ch["notes"].toArray()) if (!n.toString().isEmpty()) printf("  %s\n", qPrintable(n.toString()));
-        const QJsonArray cands = (*res)["candidates"].toArray();
-        for (const QJsonValue &v : cands) {
-            const QJsonObject o = v.toObject();
-            if (o["description"] != ch["description"]) printf("  also: %s (%s)\n", qPrintable(o["description"].toString()), qPrintable(o["tier"].toString()));
-        }
-        for (const QJsonValue &v : (*res)["volumes"].toArray()) {
-            const QJsonObject o = v.toObject(), i = o["info"].toObject();
-            printf("volume %s: %s%s\n", qPrintable(o["vol"].toString()), qPrintable(o["label"].toString()),
-                   o["readOnly"].toBool() ? qPrintable(" (read-only: " + o["readOnlyWhy"].toString() + ")") : "");
-            if (i.contains("total")) printf("  %lld bytes, %lld free\n", qint64(i["total"].toDouble()), qint64(i["free"].toDouble()));
-        }
-    }
+    if (!c.g.json && !c.g.quiet) infoText(c, *res);
     return true;
 }
 
@@ -420,19 +509,102 @@ bool cmdCheck(Ctx &c, const Parsed &p, const QStringList &, Result *res) {
     return true;
 }
 
-struct LsOut {
-    QJsonArray entries;
-    QStringList text;
+// ---- the text of ls (docs/cli.md, "ls text layout"). The entries are collected first, with the JSON in the order the
+// volume lists them, and formatted in a second pass: the columns, their widths and which of them show at all depend on
+// every entry of the listing.
+
+struct LsRow {
+    QStringList key;                     // sort key: the levels of the path, lower case (user areas in number order)
+    QString name, type, attrs, size, date;
 };
+
+struct LsBlock {                         // what is listed of one volume: one header, then its entries
+    QString header;
+    QVector<LsRow> rows;
+};
+
+struct LsOut {
+    QJsonArray entries;                  // JSON: in the order the volume lists them
+    QVector<LsBlock> blocks;             // text
+    LsBlock &block() { return blocks.last(); }
+};
+
+// A level's sort key where it is a user area: "user 10" after "user 2".
+QString numberedKey(const QString &s) {
+    QString out;
+    for (int i = 0; i < s.size();) {
+        if (!s[i].isDigit()) { out += s[i++].toLower(); continue; }
+        int j = i;
+        while (j < s.size() && s[j].isDigit()) ++j;
+        out += s.mid(i, j - i).rightJustified(12, '0');
+        i = j;
+    }
+    return out;
+}
+
+// By name, ignoring case, level by level, so a directory comes before its contents and the entries of each directory
+// are in name order; CP/M: user area first (numerically), then name.
+bool rowLess(const LsRow &a, const LsRow &b) {
+    const int n = qMin(a.key.size(), b.key.size());
+    for (int i = 0; i < n; ++i) {
+        const int c = a.key[i].compare(b.key[i]);
+        if (c != 0) return c < 0;
+    }
+    if (a.key.size() != b.key.size()) return a.key.size() < b.key.size();
+    return a.name < b.name;              // names that differ only in case: a fixed order
+}
 
 void emitEntry(const VolRef &r, const Path &dir, const fs::Entry &e, bool withVol, LsOut *out) {
     QJsonObject o = entryJson(*r.v, dir, e);
     if (withVol) o["vol"] = r.name;
     out->entries.append(o);
-    const QString type = e.kind == NodeKind::Dir ? "d" : e.kind == NodeKind::Namespace ? "u" : "-";
-    out->text << QString("%1 %2 %3 %4 %5%6").arg(type, 1).arg(e.size, 9).arg(attrSummary(r, e), -6)
-                     .arg(e.modified.isValid() ? e.modified.toString("yyyy-MM-dd HH:mm") : QString(16, ' '))
-                     .arg(withVol ? r.name + ":" : QString()).arg(r.v->displayPath(dir.child(e.name)));
+    const Path p = dir.child(e.name);
+    const bool users = r.v->caps().namespaces;
+    LsRow row;
+    for (int i = 0; i < p.parts.size(); ++i) row.key << (users && i == 0 ? numberedKey(p.parts[i]) : p.parts[i].toLower());
+    row.name = (withVol ? r.name + ":" : QString()) + r.v->displayPath(p);
+    row.type = e.isDir() ? "D" : "";
+    row.attrs = attrSummary(r, e);
+    if (!e.isDir()) row.size = (e.sizeExact ? QString() : QString("~")) + QString::number(e.size);
+    if (e.modified.isValid()) row.date = e.modified.toString("yyyy-MM-dd HH:mm");
+    out->block().rows.append(row);
+}
+
+// NAME  TYPE  ATTRIBUTES  SIZE  DATE: a column that is empty in every row is left out, the others are as wide as their
+// widest cell, two spaces between, nothing trailing.
+QStringList lsLines(QVector<LsRow> rows) {
+    std::stable_sort(rows.begin(), rows.end(), rowLess);
+    int wName = 0, wAttrs = 0, wSize = 0;
+    bool anyType = false, anyDate = false;
+    for (const LsRow &r : rows) {
+        wName = qMax(wName, int(r.name.size()));
+        wAttrs = qMax(wAttrs, int(r.attrs.size()));
+        wSize = qMax(wSize, int(r.size.size()));
+        anyType = anyType || !r.type.isEmpty();
+        anyDate = anyDate || !r.date.isEmpty();
+    }
+    QStringList lines;
+    for (const LsRow &r : rows) {
+        QStringList cols = {r.name.leftJustified(wName)};
+        if (anyType) cols << r.type.leftJustified(1);
+        if (wAttrs) cols << r.attrs.leftJustified(wAttrs);
+        if (wSize) cols << r.size.rightJustified(wSize);
+        if (anyDate) cols << r.date;
+        QString line = cols.join("  ");
+        while (line.endsWith(' ')) line.chop(1);
+        lines << line;
+    }
+    return lines;
+}
+
+// VOL: LABEL "TITLE", USED used, FREE free[, read-only]
+QString lsHeader(OpenedImage *img, const VolRef &r) {
+    const fs::VolumeInfo vi = r.v->info();
+    QString h = QString("%1: %2").arg(r.name, r.label);
+    if (!vi.title.isEmpty()) h += QString(" \"%1\"").arg(vi.title);
+    h += QString(", %1 used, %2 free").arg(vi.total - vi.free).arg(vi.free);
+    if (writeBlock(img, r.mount).blocked()) h += ", read-only";
+    return h;
 }
 
 bool listChildren(Ctx &c, const VolRef &r, const Path &dir, bool recursive, bool withVol, LsOut *out) {
@@ -467,6 +639,8 @@ bool cmdLs(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
         VolRef r;
         if (!resolveVol(c, c.img.get(), c.img->volName(i), false, &r)) return false;
         const bool rec = p.has("recursive");
+        out.blocks.append(LsBlock());
+        if (!p.has("directory")) out.block().header = lsHeader(c.img.get(), r);        // -d: no header
         if (pos.isEmpty()) {
             if (!listChildren(c, r, Path(), rec, all, &out)) return false;
             continue;
@@ -486,7 +660,11 @@ bool cmdLs(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
     Result o;
     o["entries"] = out.entries;
     *res = o;
-    if (!c.g.json && !c.g.quiet) for (const QString &t : out.text) printf("%s\n", qPrintable(t));
+    if (!c.g.json && !c.g.quiet)
+        for (const LsBlock &b : out.blocks) {
+            if (!b.header.isEmpty()) printf("%s\n", qPrintable(b.header));
+            for (const QString &line : lsLines(b.rows)) printf("%s\n", qPrintable(line));
+        }
     return true;
 }
 
@@ -1479,7 +1657,10 @@ int runCli(int argc, char **argv, const cli::AppInfo &app) {
             else {
                 c.fail(c.outcome.exitCode(), c.outcome.message);
                 ok = false;
-                if (cmd == "info") fillInfo(c, p, &result);
+                if (cmd == "info") {
+                    fillInfo(c, p, &result);
+                    if (!c.g.json && !c.g.quiet) infoText(c, result);          // what was found, and the readings --fs chooses between
+                }
                 if (c.outcome.status == OpenOutcome::Foreign && c.outcome.chosen >= 0) {
                     result["owner"] = otherAppJson(c.outcome.verdict.ranked[c.outcome.chosen].owner);
                 } else if (c.outcome.status == OpenOutcome::Foreign) {

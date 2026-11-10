@@ -112,6 +112,10 @@ public:
     virtual bool convertSides(const QString &toSides, QString *err, int *exit);
     // Applies the --charset the run was given to the volumes (cpmdw).
     virtual void setCharset(const QString &) {}
+    // Why the whole image can't be changed, when it is for a reason of the reading and not of one volume: cpmdw's
+    // "the format is not confirmed; use --format=NAME". It is already a full sentence that says what to do; a refused
+    // write reports it as "read-only: " plus this. Default: none (a mount's own reason names its volume instead).
+    virtual QString readOnlyWhy() const { return QString(); }
 };
 
 struct OpenOutcome {

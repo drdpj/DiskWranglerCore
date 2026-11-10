@@ -44,11 +44,11 @@ fs::Caps FsVolume::caps() const {
 
 QVector<fs::AttrSpec> FsVolume::fileAttrs() const {
     QVector<fs::AttrSpec> v;
-    const struct { const char *key, *label, *sample; } a[] = {
-        {"readonly", "Read-only", "R"}, {"hidden", "Hidden", "H"}, {"system", "System", "S"}, {"archive", "Archive", "A"}};
+    const struct { const char *key, *label, *sample, *letter; } a[] = {
+        {"readonly", "Read-only", "R", "R"}, {"hidden", "Hidden", "H", "H"}, {"system", "System", "S", "S"}, {"archive", "Archive", "A", "A"}};
     for (const auto &x : a) {
         fs::AttrSpec s;
-        s.key = x.key; s.label = x.label; s.type = fs::AttrSpec::Bool; s.sample = x.sample; s.dirs = true;
+        s.key = x.key; s.label = x.label; s.type = fs::AttrSpec::Bool; s.sample = x.sample; s.letter = x.letter; s.dirs = true;
         s.retroFamily = "fat"; s.retroKey = x.key;
         v << s;
     }

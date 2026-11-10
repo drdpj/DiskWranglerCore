@@ -57,7 +57,7 @@ fs::Caps Volume::caps() const {
 
 QVector<fs::AttrSpec> Volume::fileAttrs() const {
     fs::AttrSpec locked;
-    locked.key = "locked"; locked.label = "Locked"; locked.type = fs::AttrSpec::Bool; locked.sample = "L";
+    locked.key = "locked"; locked.label = "Locked"; locked.type = fs::AttrSpec::Bool; locked.sample = "L"; locked.letter = "L";
     fs::AttrSpec load;
     load.key = "load"; load.label = "Load"; load.type = fs::AttrSpec::Hex; load.bits = 18; load.sample = "FF1900";
     fs::AttrSpec exec = load;

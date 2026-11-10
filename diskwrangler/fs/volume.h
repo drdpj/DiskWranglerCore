@@ -83,6 +83,8 @@ struct AttrSpec {
     bool column = true;                  // shown as a column in a file list
     bool dirs = false;                   // directories have it too
     QString sample;                      // column width hint
+    QString letter;                      // one letter for a text listing ("L" locked, "R" read-only); empty = none.
+                                         // Only Bool attributes shown as columns are listed by it (command-line `ls`)
     QString retroFamily, retroKey;       // retro-files: "acorn", "load"; empty = not carried
 };
 
@@ -133,6 +135,10 @@ public:
     virtual Caps caps() const = 0;
     virtual QVector<AttrSpec> fileAttrs() const = 0;
     virtual QVector<AttrSpec> volumeAttrs() const { return {}; }     // title, boot option, label ...
+    // The order in which a text listing shows the attribute letters, as AttrSpec keys; empty (the default) = the order
+    // of fileAttrs(). A volume that lists its attributes in one order and shows them in another (ADFS: R W L E in the
+    // specs, L W R E as *INFO prints them) overrides this and leaves fileAttrs() as it is. Keys not named come after.
+    virtual QStringList attrLetterOrder() const { return {}; }
     virtual AttrValues volumeValues() const { return {}; }
     virtual const NameRules &names() const = 0;
     virtual VolumeInfo info() const = 0;
