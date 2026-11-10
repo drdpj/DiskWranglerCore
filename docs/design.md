@@ -628,7 +628,8 @@ Step 4b created v0.5.0: the command-line layer (`diskwrangler/cli/`, QtCore only
 `docs/cli.md` for the reference. What turned out different from the design above:
 
 1. **`dw::cli`, not `wcli`**, in `diskwrangler/cli/`: `args` (option parsing), `output` (the JSON pieces), `importer`
-   (put and copy), `commands` (the commands and `runCli`). It needs `diskwrangler-xfer`, which is new: `retrofiles.cpp`
+   (put and copy; moved to `diskwrangler/xfer/` as `dw::xfer::Importer` in step 5, series 5a, so the windows share
+   it: see `xfer/importer.h`), `commands` (the commands and `runCli`). It needs `diskwrangler-xfer`, which is new: `retrofiles.cpp`
    was QtCore-only but sat in the widgets build, so `diskwrangler-xfer.pri` / `DiskWrangler::Xfer` now hold it and
    the widgets core links them.
 2. **`Volume` gained `parsePath`, `displayPath` and `hostNameFor`** (defaults: `/` separated parts; no name), so each
