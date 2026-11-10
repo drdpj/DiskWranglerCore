@@ -56,8 +56,8 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 ## Layout
 | Folder | Holds |
 |---|---|
-| `diskwrangler/app/` | settings (`appsettings.h`), files opened from the Finder (`fileopen.h`), the clock everything that writes a date to a disc asks (`clock.h`: `dw::now`, fixed by `SOURCE_DATE_EPOCH` in the console programs) |
-| `diskwrangler/ui/` | the button bar, the licences viewer, `treecolumns.h` (`setupTreeColumns`), `uihelpers.h` (`fmtBytes`, `anyCase`, `deleteKeys`, `rootLabel`), the viewer dialog, the drag-out MIME helpers |
+| `diskwrangler/app/` | who a program is (`appinfo.h`: `AppInfo`), the image a window shows (`document.h`: `Document`), settings (`appsettings.h`), files opened from the Finder (`fileopen.h`), the clock everything that writes a date to a disc asks (`clock.h`: `dw::now`, fixed by `SOURCE_DATE_EPOCH` in the console programs) |
+| `diskwrangler/ui/` | the window kit (`discwindow.h`: `DiscWindow`; `volumepane.h`: `VolumePane`, `PaneLayout`), the button bar, the licences viewer, `treecolumns.h` (`setupTreeColumns`), `uihelpers.h` (`fmtBytes`, `anyCase`, `deleteKeys`, `rootLabel`), the viewer dialog, the drag-out MIME helpers |
 | `diskwrangler/xfer/` | a module of its own: `TransferItem`, the retro-files reader and writer with its `HostPolicy`, `hostSafeName`, the private MIME types (QtCore only) |
 | `diskwrangler/text/` | the file-viewer registry with the Plain and Hex viewers, and the text helpers (QtCore only) |
 | `diskwrangler/device/` | `Container` (the image file: raw, ImageDisk, DSK / extended DSK, TeleDisk; physical and stored-bytes views; staging; `commit` and `saveAs`), `Linear` (a disc as one run of bytes, through a `SideOrder`), `SafeSave` (temporary copy, check, `.bak`, atomic replace) (QtCore only) |
@@ -67,7 +67,7 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 | `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
 | `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) |
 | `docs/` | the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
-| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
+| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
 
 ## Versions
 Semantic-version tags. `v0.x` until the filesystem interface settles; a program pins one tag through its submodule,

@@ -16,7 +16,7 @@ if(NOT CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)   # dragoutmime.h and viewerdialog.h have signals and slots
+set(CMAKE_AUTOMOC ON)   # dragoutmime.h, viewerdialog.h, discwindow.h and volumepane.h have signals and slots
 
 # An application has found Qt already; on its own, the core finds it the way the applications do.
 if(NOT QT_VERSION_MAJOR)
@@ -110,23 +110,28 @@ add_library(diskwrangler-core STATIC
     diskwrangler/app/handoff.cpp
     diskwrangler/text/textviews.cpp
     diskwrangler/text/viewers.cpp
+    diskwrangler/ui/discwindow.cpp
     diskwrangler/ui/dragoutmime.cpp
     diskwrangler/ui/handoffdialog.cpp
     diskwrangler/ui/licences.cpp
     diskwrangler/ui/viewerdialog.cpp
+    diskwrangler/ui/volumepane.cpp
     diskwrangler/app/appinfo.h
     diskwrangler/app/appsettings.h
+    diskwrangler/app/document.h
     diskwrangler/app/fileopen.h
     diskwrangler/app/handoff.h
     diskwrangler/text/textviews.h
     diskwrangler/text/viewers.h
     diskwrangler/ui/buttonbar.h
+    diskwrangler/ui/discwindow.h
     diskwrangler/ui/dragoutmime.h
     diskwrangler/ui/handoffdialog.h
     diskwrangler/ui/licences.h
     diskwrangler/ui/treecolumns.h
     diskwrangler/ui/uihelpers.h
-    diskwrangler/ui/viewerdialog.h)
+    diskwrangler/ui/viewerdialog.h
+    diskwrangler/ui/volumepane.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device DiskWrangler::Fs DiskWrangler::Xfer Qt${QT_VERSION_MAJOR}::Widgets)

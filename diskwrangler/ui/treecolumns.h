@@ -40,11 +40,14 @@ struct ColSpec {
 
 inline constexpr const char *NumPad = "  ";
 
-inline void setupTreeColumns(QTreeWidget *t, std::initializer_list<ColSpec> cols) {
+// The same for any list of columns with label, sample and numeric members (ColSpec, or the window kit's PaneColumn,
+// whose texts are QStrings).
+template <typename Columns>
+inline void setupTreeColumnsFrom(QTreeWidget *t, const Columns &cols) {
     const QFontMetrics fm(t->font());
     const int margin = 2 * t->style()->pixelMetric(QStyle::PM_HeaderMargin, nullptr, t) + fm.averageCharWidth();
     QStringList labels;
-    for (const ColSpec &c : cols) labels << (c.numeric ? QString(c.label) + NumPad : QString(c.label));
+    for (const auto &c : cols) labels << (c.numeric ? QString(c.label) + NumPad : QString(c.label));
     t->setColumnCount(labels.size());
     t->setHeaderLabels(labels);
     QHeaderView *h = t->header();
@@ -52,10 +55,10 @@ inline void setupTreeColumns(QTreeWidget *t, std::initializer_list<ColSpec> cols
     h->setSectionResizeMode(QHeaderView::Interactive);
     h->setSectionResizeMode(0, QHeaderView::Stretch);
     int fixed = 0, i = 0;
-    for (const ColSpec &c : cols) {
+    for (const auto &c : cols) {
         if (i > 0) {
             QString pad = c.numeric ? NumPad : "";
-            int w = qMax(fm.horizontalAdvance(c.sample + pad), fm.horizontalAdvance(labels[i])) + margin;
+            int w = qMax(fm.horizontalAdvance(QString(c.sample) + pad), fm.horizontalAdvance(labels[i])) + margin;
             t->setColumnWidth(i, w);
             fixed += w;
             if (c.numeric) t->headerItem()->setTextAlignment(i, Qt::AlignRight | Qt::AlignVCenter);
@@ -69,6 +72,8 @@ inline void setupTreeColumns(QTreeWidget *t, std::initializer_list<ColSpec> cols
     t->setUniformRowHeights(true);
     t->setContextMenuPolicy(Qt::CustomContextMenu);
 }
+
+inline void setupTreeColumns(QTreeWidget *t, std::initializer_list<ColSpec> cols) { setupTreeColumnsFrom(t, cols); }
 
 inline void setNumCell(QTreeWidgetItem *it, int col, const QString &text) {
     it->setText(col, text + NumPad);
