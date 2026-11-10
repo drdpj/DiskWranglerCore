@@ -147,8 +147,8 @@ static int runConsole(int argc, char **argv) {
     TestBackend be;
     cli::AppInfo app;
     app.tool = "clitest";
-    app.appName = "CLI test";
-    app.appVersion = "0";
+    app.program.name = "CLI test";
+    app.program.version = "0";
     app.backend = &be;
     return runCli(argc - 1, argv + 1, app);          // argv[1] was "__cli"
 }
