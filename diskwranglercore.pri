@@ -25,7 +25,8 @@ include($$PWD/diskwrangler-fs.pri)              # the filesystem layer: Volume, 
 include($$PWD/diskwrangler-xfer.pri)            # transfer items and retro-files (QtCore only)
 # (the optional modules: diskwrangler-dfs.pri, diskwrangler-fat.pri, and for a console program diskwrangler-cli.pri)
 
-HEADERS += $$PWD/diskwrangler/app/appsettings.h \
+HEADERS += $$PWD/diskwrangler/app/appinfo.h \
+           $$PWD/diskwrangler/app/appsettings.h \
            $$PWD/diskwrangler/app/fileopen.h \
            $$PWD/diskwrangler/app/handoff.h \
            $$PWD/diskwrangler/text/textviews.h \

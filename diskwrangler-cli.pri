@@ -10,7 +10,8 @@ DW_PRI_DONE += cli
 }
 include($$PWD/diskwrangler-xfer.pri)
 
-HEADERS += $$PWD/diskwrangler/cli/args.h \
+HEADERS += $$PWD/diskwrangler/app/appinfo.h \
+           $$PWD/diskwrangler/cli/args.h \
            $$PWD/diskwrangler/cli/cli.h \
            $$PWD/diskwrangler/cli/output.h
 SOURCES += $$PWD/diskwrangler/cli/args.cpp \

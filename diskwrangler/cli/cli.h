@@ -33,6 +33,7 @@
 #include <QVector>
 #include <memory>
 
+#include <diskwrangler/app/appinfo.h>
 #include <diskwrangler/device/container.h>
 #include <diskwrangler/fs/detection.h>
 #include <diskwrangler/fs/disc.h>
@@ -158,10 +159,11 @@ public:
     virtual void configureTarget(fs::Volume *, const ImportOptions &) {}
 };
 
+// The console program: its own name and options, beside the program of the family it belongs to (dw::app::AppInfo:
+// name and version, as the window's Help > About shows them).
 struct AppInfo {
     QString tool;                        // "acorndw"
-    QString appName;                     // "Acorn Disk Wrangler"
-    QString appVersion;                  // as Help > About shows it
+    app::AppInfo program;                // name "Acorn Disk Wrangler", version as Help > About shows it, ...
     Backend *backend = nullptr;
     // The options this tool has beyond the common ones: "sides", "diskdefs", "charset", "sidecars", "user-folders",
     // "trim", "title", "dosboot", "container-new", "stamps", "label", "separate-sides", "to-sides", "format-open".

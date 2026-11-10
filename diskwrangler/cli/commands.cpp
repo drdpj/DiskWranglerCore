@@ -785,7 +785,7 @@ bool cmdGet(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
         QJsonArray kept;
         for (const QJsonValue &ji : jsonItems)
             if (!skipped.contains(ji.toObject()["path"].toString())) kept.append(ji);
-        const QByteArray doc = xfer::makeJson(kept, hostDir, c.imagePath, r.v->fsId(), c.app.appName);
+        const QByteArray doc = xfer::makeJson(kept, hostDir, c.imagePath, r.v->fsId(), c.app.program.name);
         manifest = p.value("manifest");
         QFile f(manifest);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate) || f.write(doc) != doc.size()) {
@@ -1625,7 +1625,7 @@ int runCli(int argc, char **argv, const cli::AppInfo &app) {
     QString perr;
     if (!parseLeading(args, gspecs, &lead, &rest, &perr)) return usageFail(perr, QString(), jsonWanted, QString());
     if (lead.has("version")) {
-        printf("%s %s (DiskWranglerCore %s)\n", qPrintable(app.tool), qPrintable(app.appVersion), DW_CORE_VERSION);
+        printf("%s %s (DiskWranglerCore %s)\n", qPrintable(app.tool), qPrintable(app.program.version), DW_CORE_VERSION);
         return 0;
     }
     if (rest.isEmpty()) {

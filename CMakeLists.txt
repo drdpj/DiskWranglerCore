@@ -76,6 +76,7 @@ add_library(diskwrangler-cli STATIC
     diskwrangler/cli/args.cpp
     diskwrangler/cli/commands.cpp
     diskwrangler/cli/output.cpp
+    diskwrangler/app/appinfo.h
     diskwrangler/cli/args.h
     diskwrangler/cli/cli.h
     diskwrangler/cli/output.h)
@@ -113,6 +114,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/handoffdialog.cpp
     diskwrangler/ui/licences.cpp
     diskwrangler/ui/viewerdialog.cpp
+    diskwrangler/app/appinfo.h
     diskwrangler/app/appsettings.h
     diskwrangler/app/fileopen.h
     diskwrangler/app/handoff.h
