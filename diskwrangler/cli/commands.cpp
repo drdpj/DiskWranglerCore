@@ -34,7 +34,6 @@
 
 #include <diskwrangler/app/clock.h>
 #include <diskwrangler/cli/args.h>
-#include <diskwrangler/cli/importer.h>
 #include <diskwrangler/cli/output.h>
 
 namespace dw {
@@ -44,6 +43,7 @@ namespace {
 
 using fs::NodeKind;
 using fs::Path;
+using xfer::Change;
 
 // ---------------------------------------------------------------------------------------------- options
 
@@ -818,18 +818,34 @@ bool lettersOption(Ctx &c, const Parsed &p, ImportOptions *o) {
     return true;
 }
 
+// The Importer's error kinds as exit codes (docs/cli.md, "Exit codes").
+static int exitForImport(xfer::ImportError::Kind k) {
+    switch (k) {
+    case xfer::ImportError::Conflict: return ExitConflict;
+    case xfer::ImportError::Locked: return ExitUnsupported;
+    default: return ExitFailed;
+    }
+}
+
+// The command line runs the Importer with neither a conflict callback nor a directory hook, and onError = Stop: the
+// options decide, and the first failure abandons the run.
 bool runImport(Ctx &c, const VolRef &dest, QVector<TransferItem> &items, const QStringList &froms, const Path &dir,
                const ImportOptions &io, Result *res) {
     c.be()->prepareIncoming(&items, dest.v);
     c.be()->configureTarget(dest.v, io);
-    Importer imp(dest.v, dest.label, io);
-    ImportResult ir;
-    Error err;
-    const bool ok = imp.import(items, froms, dir, &ir, &err);
+    xfer::Importer imp(dest.v, dest.label, io);
+    xfer::ImportResult ir;
+    xfer::ImportError ie;
+    const bool ok = imp.import(items, froms, dir, &ir, &ie);
     c.addChanges(ir.changes);
     for (const QString &w : ir.warnings) c.warn(w);
     *res = ir.json();
-    if (!ok) { c.err = err; return false; }
+    if (!ok) {
+        c.err.code = exitForImport(ie.kind);
+        c.err.message = ie.message;
+        c.err.path = ie.path;
+        return false;
+    }
     if (!c.g.json && !c.g.quiet)
         for (const Change &ch : ir.changes) printf("%s %s\n", qPrintable(ch.op), qPrintable(ch.path));
     return true;

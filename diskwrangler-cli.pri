@@ -12,10 +12,8 @@ include($$PWD/diskwrangler-xfer.pri)
 
 HEADERS += $$PWD/diskwrangler/cli/args.h \
            $$PWD/diskwrangler/cli/cli.h \
-           $$PWD/diskwrangler/cli/importer.h \
            $$PWD/diskwrangler/cli/output.h
 SOURCES += $$PWD/diskwrangler/cli/args.cpp \
            $$PWD/diskwrangler/cli/commands.cpp \
-           $$PWD/diskwrangler/cli/importer.cpp \
            $$PWD/diskwrangler/cli/output.cpp
 }

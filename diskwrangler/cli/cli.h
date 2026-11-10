@@ -36,6 +36,7 @@
 #include <diskwrangler/device/container.h>
 #include <diskwrangler/fs/detection.h>
 #include <diskwrangler/fs/disc.h>
+#include <diskwrangler/xfer/importer.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
 #define DW_CORE_VERSION "0.5.0"
@@ -86,10 +87,8 @@ struct PutOptions {
     QString sidecars;                    // "inf" or "none"
 };
 
-struct ImportOptions {
-    bool replace = false, skip = false, force = false;
-    QString letters = "dirs";            // DFS items arriving on ADFS: "dirs" or "flatten"
-};
+// put and copy: --replace, --skip, --force, --letters (the Importer's options, diskwrangler/xfer/importer.h)
+using ImportOptions = xfer::ImportOptions;
 
 // ----- an opened image
 
