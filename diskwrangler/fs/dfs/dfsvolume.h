@@ -57,6 +57,8 @@ public:
     QString displayPath(const fs::Path &p) const override;
 
     bool list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const override;
+    // A name without a letter is in $ ("PROG" is "$.PROG"), as for read: the default stat compares listed names.
+    bool stat(const fs::Path &node, fs::Entry *out, QString *err) const override;
     bool read(const fs::Path &file, QByteArray *out, QString *err) const override;
     bool write(const fs::Path &dir, const QString &name, const QByteArray &data, const fs::AttrValues &attrs,
                const QDateTime &when, bool replace, QString *err) override;

@@ -84,6 +84,11 @@ int main(int argc, char **argv) {
         QByteArray data;
         CHECK(vol->read(fs::Path({"A.PROG"}), &data, &err) && data == QByteArray(600, 'p'), "read back");
         CHECK(!vol->read(fs::Path({"B.PROG"}), &data, &err), "another letter is another file");
+        {
+            fs::Entry be;
+            CHECK(vol->stat(fs::Path({"boot"}), &be, &err) && be.name == "$.BOOT" && be.attrs["locked"].toBool() &&
+                      !vol->stat(fs::Path({"B.BOOT"}), &be, &err), "stat: a name without a letter is in $ (BOOT is $.BOOT)");
+        }
         QMap<QString, QJsonObject> r = vol->toRetro(prog);
         CHECK(r["acorn"]["load"].toString() == "FFFF1900" && r["acorn"]["exec"].toString() == "00008023" && r["acorn"]["access"].toString() == "WR",
               "toRetro: 8 digits, access WR");

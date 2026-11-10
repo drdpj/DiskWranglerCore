@@ -134,6 +134,19 @@ bool Volume::find(const fs::Path &p, int *idx, QString *err) const {
     return true;
 }
 
+bool Volume::stat(const fs::Path &node, fs::Entry *out, QString *err) const {
+    if (node.isRoot()) return fs::Volume::stat(node, out, err);
+    int i;
+    QString why;
+    if (!find(node, &i, &why)) { if (err) *err = "not found: " + node.toString(); return false; }   // the default's text
+    const File &f = m_d->files()[i];
+    *out = fs::Entry();
+    out->name = f.fullName();
+    out->size = f.length;
+    out->attrs = {{"locked", f.locked}, {"load", f.load}, {"exec", f.exec}};
+    return true;
+}
+
 bool Volume::read(const fs::Path &file, QByteArray *out, QString *err) const {
     int i;
     return find(file, &i, err) && m_d->readFile(m_d->files()[i], out, err);
