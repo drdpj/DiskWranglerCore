@@ -20,6 +20,11 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <diskwrangler/ui/discwindow.h>
+#include <diskwrangler/xfer/retrofiles.h>
+#include "memvolume.h"
 
 using namespace dw;
 
@@ -57,6 +62,177 @@ static QLabel *info(QWidget *w) { return w->findChildren<QLabel *>().last(); }  
 static QCheckBox *box(QWidget *w, const QString &label) {
     for (QCheckBox *b : w->findChildren<QCheckBox *>()) if (b->text() == label) return b;
     return nullptr;
+}
+
+// ------------------------------------------------------------------------------------------- the window kit (step 5c)
+
+// A window of the kit over a MemDocument: what a program's main window fills in, at its plainest.
+class KitWindow : public dw::ui::DiscWindow {
+public:
+    explicit KitWindow(memvol::MemDocument *d, dw::ui::PaneLayout l = {}) : m_doc(d), m_layout(l) {
+        if (m_layout.columns.isEmpty()) m_layout.columns = {{"Name", "", false}, {"Size", "100000", true}};
+        setupKit();
+        refresh();
+    }
+    dw::app::Document *document() const override { return m_doc; }
+    dw::app::AppInfo appInfo() const override { dw::app::AppInfo a; a.name = "Kit Test"; return a; }
+    QStringList shown;                                         // what the status line was given (first variant), and messages
+protected:
+    ActionSpec actionSpec(Act a) const override {
+        switch (a) {
+        case Act::Save: return {"&Save", {QKeySequence::Save}, QString(), QString()};
+        case Act::Delete: return {"&Delete", {}, "Delete", QString()};
+        case Act::Extract: return {"E&xtract to folder...", {}, "Extract", QString()};
+        case Act::Rename: return {"Re&name...", {}, QString(), QString()};
+        default: return {};
+        }
+    }
+    dw::ui::PaneLayout paneLayout(const QString &) const override { return m_layout; }
+    void decorateRow(QTreeWidgetItem *row, int mount, const dw::fs::Path &p, const dw::fs::Entry *e) const override {
+        DiscWindow::decorateRow(row, mount, p, e);
+        if (e && !e->isDir()) dw::setNumCell(row, 1, QString::number(e->size));
+        row->setData(0, Qt::UserRole, 7);                     // a program's own role, beside the kit's
+    }
+    QStringList statusVariants() const override { return {QString("%1 mounts").arg(m_doc->disc().mounts().size())}; }
+    void showMessage(const QString &t) override { shown << t; }
+private:
+    memvol::MemDocument *m_doc;
+    dw::ui::PaneLayout m_layout;
+};
+
+static QStringList rowTexts(QTreeWidget *t) {
+    QStringList out;
+    QList<QPair<QTreeWidgetItem *, int>> q;
+    for (int i = 0; i < t->topLevelItemCount(); ++i) q << qMakePair(t->topLevelItem(i), 0);
+    while (!q.isEmpty()) {
+        auto p = q.takeFirst();
+        out << QString(p.second * 2, ' ') + p.first->text(0);
+        for (int i = p.first->childCount() - 1; i >= 0; --i) q.prepend(qMakePair(p.first->child(i), p.second + 1));
+    }
+    return out;
+}
+
+static void kitTests() {
+    using dw::fs::Path;
+    using Item = dw::ui::DiscWindow::Item;
+    dw::ui::DiscWindow::autoAnswer = true;
+    QString err;
+
+    printf("== window kit: one mount (rows, roles, columns)\n");
+    {
+        memvol::MemDocument doc(1, "/tmp/kit.img");
+        auto *v = doc.vol(0);
+        v->write(Path(), "a.txt", "aaa", {}, QDateTime(), false, &err);
+        v->mkdir(Path(), "dir", &err);
+        v->write(Path({"dir"}), "b.txt", "bbbb", {}, QDateTime(), false, &err);
+        v->write(Path(), "c.txt", "c", {{"locked", true}}, QDateTime(), false, &err);
+        doc.markClean();
+        KitWindow w(&doc);
+        dw::ui::VolumePane *p = w.pane();
+        CHECK(p && w.centralWidget() == p && w.panes().size() == 1, "one group: one pane, the central widget");
+        CHECK(p->columnCount() == 2 && p->headerItem()->text(1) == QString("Size") + dw::NumPad, "columns from the program's layout");
+        const QStringList rows = rowTexts(p);
+        CHECK(rows == QStringList({"MEM", "  a.txt", "  c.txt", "  dir", "    b.txt"}), qPrintable("rows in the volume's order, the root titled by the mount: " + rows.join("|")));
+        QTreeWidgetItem *b = p->findRow(0, Path({"dir", "b.txt"}));
+        const dw::ui::PaneRow r = dw::ui::VolumePane::rowOf(b);
+        CHECK(b && r.mount == 0 && r.path == Path({"dir", "b.txt"}) && r.isFile() && b->data(0, Qt::UserRole).toInt() == 7,
+              "a row carries (mount, Path, kind) and the program's own role");
+        CHECK(b && b->text(1) == QString("4") + dw::NumPad, "decorateRow writes the cells");
+        CHECK(p->findRow(0, Path({"dir"}))->isExpanded() && p->topLevelItem(0)->isExpanded(), "ExpandAll: every row with something under it opens");
+        CHECK(w.windowTitle() == "kit.img - Kit Test" && w.shown.isEmpty(), qPrintable("title: " + w.windowTitle()));
+        CHECK(w.action(dw::ui::DiscWindow::Act::Save) && !w.action(dw::ui::DiscWindow::Act::View), "only the actions the program names are made");
+
+        // selection
+        p->findRow(0, Path({"dir"}))->setSelected(true);
+        p->findRow(0, Path({"a.txt"}))->setSelected(true);
+        QVector<Item> sel = w.selectedFiles();
+        CHECK(sel.size() == 2 && sel.contains(Item(0, Path({"a.txt"}))) && sel.contains(Item(0, Path({"dir", "b.txt"}))),
+              "the selection as (mount, Path): a folder stands for the files under it");
+        CHECK(w.action(dw::ui::DiscWindow::Act::Delete)->isEnabled() && !w.action(dw::ui::DiscWindow::Act::Rename)->isEnabled(),
+              "Delete enabled with files selected; Rename only for one file");
+
+        // expansion and selection kept across a refresh
+        p->findRow(0, Path({"dir"}))->setExpanded(false);
+        v->mkdir(Path(), "new", &err);
+        v->write(Path({"new"}), "n.txt", "n", {}, QDateTime(), false, &err);
+        w.refresh();
+        CHECK(!p->findRow(0, Path({"dir"}))->isExpanded() && p->findRow(0, Path({"new"}))->isExpanded(),
+              "a folder closed stays closed; a new one opens");
+        CHECK(p->findRow(0, Path({"dir"}))->isSelected() && p->findRow(0, Path({"a.txt"}))->isSelected(), "the selection is kept");
+
+        // Delete: one transaction; a refusal half way puts everything back
+        p->clearSelection();
+        doc.markClean();
+        w.refresh();
+        CHECK(!doc.dirty(), "nothing changed yet (the disc as made)");
+        CHECK(!w.deleteFiles({Item(0, Path({"a.txt"})), Item(0, Path({"c.txt"}))}, &err) && err.contains("locked"),
+              qPrintable("deleting a.txt and the locked c.txt fails: " + err));
+        dw::fs::Entry e;
+        CHECK(v->stat(Path({"a.txt"}), &e, &err) && !doc.dirty(), "a.txt is back, nothing is staged");
+        p->findRow(0, Path({"a.txt"}))->setSelected(true);
+        p->findRow(0, Path({"dir"}))->setSelected(true);
+        w.deleteSelected();
+        CHECK(!p->findRow(0, Path({"a.txt"})) && !p->findRow(0, Path({"dir", "b.txt"})) && p->findRow(0, Path({"c.txt"})),
+              "Delete removes the selected files, and the rows go");
+        CHECK(doc.dirty() && w.windowTitle() == "kit.img * - Kit Test", "the document is changed: the title says so");
+        p->findRow(0, Path({"c.txt"}))->setSelected(true);
+        w.deleteSelected();
+        CHECK(p->findRow(0, Path({"c.txt"})) && !w.shown.isEmpty() && w.shown.last().startsWith("Delete: Nothing was deleted: "),
+              qPrintable("a refused delete: the program's text, the file stays: " + w.shown.value(w.shown.size() - 1)));
+
+        // Save
+        CHECK(w.save() && doc.saves() == 1 && !doc.dirty() && w.shown.last() == "Saved kit.img" && w.windowTitle() == "kit.img - Kit Test",
+              "Save: the document saves, the window says so");
+        doc.vol(0)->write(Path(), "z.txt", "z", {}, QDateTime(), false, &err);
+        doc.readOnly = "a test";
+        w.refresh();
+        CHECK(!w.save() && doc.saves() == 1 && w.shown.last() == "Save: The disc is read-only: a test", "a read-only disc isn't saved");
+        CHECK(!w.action(dw::ui::DiscWindow::Act::Save)->isEnabled() && !w.deleteFiles({Item(0, Path({"z.txt"}))}, &err) && err == "read-only: a test",
+              "read-only: Save off, Delete refused");
+        doc.readOnly.clear();
+    }
+
+    printf("== window kit: two mounts in one group; Extract\n");
+    {
+        memvol::MemDocument doc(2, "/tmp/two.img");
+        doc.vol(0)->write(Path(), "zero.txt", "side zero\n", {}, QDateTime(), false, &err);
+        doc.vol(1)->mkdir(Path(), "d", &err);
+        doc.vol(1)->write(Path({"d"}), "one.bin", QByteArray("\x01\x02\x03", 3), {{"locked", true}}, QDateTime(), false, &err);
+        dw::ui::PaneLayout l;
+        l.expand = dw::ui::PaneLayout::ExpandRoots;
+        l.reselectFolders = false;
+        l.columns = {{"Name", "", false}};
+        KitWindow w(&doc, l);
+        dw::ui::VolumePane *p = w.pane();
+        CHECK(p->topLevelItemCount() == 2 && p->topLevelItem(0)->text(0) == "part 0" && p->topLevelItem(1)->text(0) == "part 1",
+              "two mounts in one group: two root rows in one pane");
+        CHECK(p->topLevelItem(1)->isExpanded() && !p->findRow(1, Path({"d"}))->isExpanded(), "ExpandRoots: only the roots open at first");
+        p->findRow(1, Path({"d"}))->setSelected(true);
+        p->findRow(0, Path({"zero.txt"}))->setSelected(true);
+        QVector<Item> sel = w.selectedFiles();
+        CHECK(sel.size() == 2 && sel.contains(Item(1, Path({"d", "one.bin"}))) && sel.contains(Item(0, Path({"zero.txt"}))),
+              "the selection spans both roots");
+        QTemporaryDir td;
+        int n = 0;
+        QStringList errors;
+        QJsonArray j;
+        CHECK(w.extractTo(sel, td.path(), &n, &errors, &j, &err) && n == 2 && errors.isEmpty(), "Extract writes them");
+        QFile a(td.path() + "/zero.txt"), b(td.path() + "/one.bin");
+        CHECK(a.open(QIODevice::ReadOnly) && a.readAll() == "side zero\n" && b.open(QIODevice::ReadOnly) && b.readAll() == QByteArray("\x01\x02\x03", 3),
+              "the files hold the bytes read from each volume");
+        bool locked = false;
+        for (const QJsonValue &x : j)
+            if (x.toObject()["name"].toString() == "one.bin")
+                locked = x.toObject()["attributes"].toObject()["mem"].toObject()["locked"].toBool();
+        const QByteArray doc2 = dw::xfer::makeJson(j, td.path(), "two.img", "mem", "Kit Test");
+        QVector<dw::TransferItem> back;
+        CHECK(j.size() == 2 && locked && dw::xfer::readJson(doc2, &back, &err) && back.size() == 2,
+              qPrintable("the retro-files items carry each file's attributes, and the document reads back: " + err));
+        w.refresh();
+        CHECK(!p->findRow(1, Path({"d"}))->isSelected() && p->findRow(0, Path({"zero.txt"}))->isSelected(),
+              "reselectFolders off: a refresh keeps the files selected, not the folders");
+    }
+    dw::ui::DiscWindow::autoAnswer = false;
 }
 
 int main(int argc, char **argv) {
@@ -190,6 +366,8 @@ int main(int argc, char **argv) {
         AppSettings().remove("otherApps/" + other.id);
     }
 #endif
+
+    kitTests();
 
     printf(failures ? "%d FAILURES\n" : "all ok\n", failures);
     return failures ? 1 : 0;
