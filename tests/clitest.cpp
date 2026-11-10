@@ -43,6 +43,7 @@ static QByteArray blankPc720() {
 
 // A FAT volume that lists its entries in no particular order, in mixed case, with one size not exact, no dates, and
 // shows its attribute letters in an order of its own: what a text listing has to sort, align and leave out.
+class PlainSizeVolume;        // (below) as OddVolume, but a size known only to a record is shown as the plain number, as CP/M does
 class OddVolume : public fat::FsVolume {
 public:
     using fat::FsVolume::FsVolume;
@@ -57,6 +58,11 @@ public:
         return true;
     }
     QStringList attrLetterOrder() const override { return {"archive", "system", "hidden", "readonly"}; }
+};
+class PlainSizeVolume : public OddVolume {
+public:
+    using OddVolume::OddVolume;
+    bool marksInexactSizes() const override { return false; }
 };
 
 // The image's behaviour is chosen by the second suffix of its file name: x.odd.img, x.ro.img (the mount is read-only),
@@ -77,13 +83,14 @@ public:
         fv = std::make_shared<fat::Volume>();
         if (!fv->attach(lin.get(), 0, quint32(c.rawFileSize()), err)) return false;
         d.setContainer(&c);
-        std::shared_ptr<fs::Volume> vol = mode == "odd" ? std::make_shared<OddVolume>(fv) : std::make_shared<fat::FsVolume>(fv);
+        std::shared_ptr<fs::Volume> vol = mode == "recsize" ? std::make_shared<PlainSizeVolume>(fv) : mode == "odd" ? std::make_shared<OddVolume>(fv) : std::make_shared<fat::FsVolume>(fv);
         const bool ro = mode == "ro" || mode == "whole" || mode == "cpm";
         d.addMount({"DOS", vol, ro, mode == "ro" ? QString("reason of the volume") : ro ? readOnlyWhy() : QString()});
         return true;
     }
     fs::Disc &disc() override { return d; }
     bool save(bool backup, QString *err) override { return d.commit([&] { device::Container::SaveOptions o; o.backup = backup; return o; }(), err); }
+    QString volumeNote(int) const override { return mode == "recsize" ? QString("detected - see info") : QString(); }
     QString readOnlyWhy() const override { return mode == "whole" || mode == "cpm" ? QString("the whole image says so; use --thing") : QString(); }
     QJsonObject app() const override {
         QJsonObject o{{"name", "clitest"}};
@@ -317,14 +324,14 @@ int main(int argc, char **argv) {
         const QJsonObject vi = dwcli({"--json", "info", t}).json["result"].toObject()["volumes"].toArray()[0].toObject()["info"].toObject();
         const qint64 total = qint64(vi["total"].toDouble()), freeB = qint64(vi["free"].toDouble());
         CHECK(r.exit == 0 && l.value(0) == QString("dos: DOS, %1 used, %2 free").arg(total - freeB).arg(freeB), "the header names the volume, its label, used and free: " + l.value(0));
-        CHECK(l.size() == 4 && l[1] == "/A.TXT  A    5  2000-01-01 00:00", "no directory: no TYPE column (FAT sets the archive bit on new files): " + l.value(1));
+        CHECK(l.size() == 4 && l[1] == "/A.TXT  A       5  2000-01-01 00:00", "no directory: no TYPE column (FAT sets the archive bit on new files): " + l.value(1));
         const QString plain = d + "/plain.img";
         QFile::copy(t, plain);
         dwcli({"attr", plain, "A.TXT", "B.TXT", "C.TXT", "--set", "archive=0"});
         r = dwcli({"ls", plain});
         l = QString::fromUtf8(r.out).split('\n', Qt::SkipEmptyParts);
-        CHECK(l.size() == 4 && l[1] == "/A.TXT    5  2000-01-01 00:00" && l[3] == "/C.TXT  123  2000-01-01 00:00",
-              "no directory and no attribute set: neither a TYPE nor an ATTRIBUTES column: " + l.value(1));
+        CHECK(l.size() == 4 && l[1] == "/A.TXT          5  2000-01-01 00:00" && l[3] == "/C.TXT        123  2000-01-01 00:00",
+              "no directory and no attribute set: no TYPE column, but the ATTRIBUTES column stays (blank, as wide as the letters): " + l.value(1));
 
         dwcli({"mkdir", t, "DIR"});
         dwcli({"put", t, d + "/h/z.txt", "/DIR"});
@@ -343,7 +350,7 @@ int main(int argc, char **argv) {
         CHECK(l.size() == 6 && l.value(4).startsWith("/DIR  ") && l.value(5) == "/DIR/Z.TXT     A       2  2000-01-01 00:00",
               "-R lists a directory and then its contents, one header, names padded to the widest: " + l.value(5));
         r = dwcli({"ls", t, "-d", "DIR"});
-        CHECK(r.exit == 0 && QString::fromUtf8(r.out) == "/DIR  D  2000-01-01 00:00\n", "-d: the node itself, no header, columns left out when empty: " + QString(r.out));
+        CHECK(r.exit == 0 && QString::fromUtf8(r.out) == "/DIR  D        2000-01-01 00:00\n", "-d: the node itself, no header, no SIZE column, the attribute column kept: " + QString(r.out));
         r = dwcli({"--quiet", "ls", t});
         CHECK(r.exit == 0 && r.out.isEmpty(), "-q: no text");
         r = dwcli({"--json", "ls", t});
@@ -361,6 +368,12 @@ int main(int argc, char **argv) {
         CHECK(l.value(2) == "/b.txt     AH      12", "odd: lower case sorts with upper case: " + l.value(2));
         CHECK(l.value(3) == "/C.TXT     ASHR  ~123", "odd: ~ marks a size known only to a record, and counts in the width: " + l.value(3));
         CHECK(l.value(4) == "/DIR    D", "odd: trailing spaces are trimmed: " + l.value(4));
+        const QString plainSize = d + "/x.recsize.img";
+        QFile::copy(t, plainSize);
+        r = dwcli({"ls", plainSize});
+        l = QString::fromUtf8(r.out).split('\n', Qt::SkipEmptyParts);
+        CHECK(l.value(3) == "/C.TXT     ASHR  123", "a volume that says so shows a size known only to a record as the plain number: " + l.value(3));
+        CHECK(l.value(0).startsWith("dos: DOS (detected - see info), "), "the header carries the volume's note: " + l.value(0));
         r = dwcli({"--json", "ls", odd});
         const QJsonArray en = r.json["result"].toObject()["entries"].toArray();
         CHECK(en.size() == 4 && en[0].toObject()["display"] == "/DIR" && en[3].toObject()["display"] == "/A.TXT",
@@ -396,12 +409,12 @@ int main(int argc, char **argv) {
         QFile::copy(t, c);
         r = dwcli({"info", c});
         QStringList x = QString::fromUtf8(r.out).split('\n', Qt::SkipEmptyParts);
-        CHECK(x.value(2) == "format: detected (detected)" && x.value(3) == "  26x128, 77 trk", "format with its origin and summary indented: " + x.value(2));
+        CHECK(x.value(2) == "format: custom, not in the library" && x.value(3) == "  26x128, 77 trk", "format with its origin and summary indented: " + x.value(2));
         CHECK(x.value(4) == "reading: low, read-only" && x.value(5) == "  The directory is empty." && x.value(6) == "  the whole image says so; use --thing",
               "a read-only reading: the reason, then the instruction: " + x.value(4));
-        CHECK(x.value(7) == "definition:" && x.value(8) == "  diskdef detected" && x.value(10) == "  end" && x.value(11).startsWith("  Save this definition to a file, give it a name, and pass --diskdefs=FILE --format=NAME"),
+        CHECK(x.value(7) == "definition:" && x.value(8) == "  diskdef detected" && x.value(10) == "  end" && x.value(11) == "  To change this disc, save the definition to a file, give it a name," && x.value(12) == "  and pass --diskdefs=FILE --format=NAME with each command.",
               "a layout that is not in the library: its definition, then what to do: " + x.value(8));
-        CHECK(x.value(12) == "volume dos: DOS (fat), read-only: the whole image says so; use --thing", "the volume says it is read-only and why: " + x.value(12));
+        CHECK(x.value(13) == "volume dos: DOS (fat), read-only", "the volume says it is read-only (the reading has said why): " + x.value(13));
     }
 
     printf("text output: read-only messages, exit 4\n");

@@ -116,6 +116,9 @@ public:
     // "the format is not confirmed; use --format=NAME". It is already a full sentence that says what to do; a refused
     // write reports it as "read-only: " plus this. Default: none (a mount's own reason names its volume instead).
     virtual QString readOnlyWhy() const { return QString(); }
+    // A few words for the header of mount i in a text listing, after the file system's name: cpmdw's
+    // "detected - see info" for a layout that is not in its library. Default: none.
+    virtual QString volumeNote(int mount) const { Q_UNUSED(mount); return QString(); }
 };
 
 struct OpenOutcome {

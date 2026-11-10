@@ -139,6 +139,9 @@ public:
     // of fileAttrs(). A volume that lists its attributes in one order and shows them in another (ADFS: R W L E in the
     // specs, L W R E as *INFO prints them) overrides this and leaves fileAttrs() as it is. Keys not named come after.
     virtual QStringList attrLetterOrder() const { return {}; }
+    // Whether a text listing marks a size that is only known to a record with "~". CP/M shows the plain number, as its
+    // own program does; default: marked.
+    virtual bool marksInexactSizes() const { return true; }
     virtual AttrValues volumeValues() const { return {}; }
     virtual const NameRules &names() const = 0;
     virtual VolumeInfo info() const = 0;

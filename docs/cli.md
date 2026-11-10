@@ -81,7 +81,7 @@ Each volume listed starts with a header line:
 
 VOL is the volume's name (what `--vol` takes: `adfs`, `dos`, `side0`, `cpm`), LABEL its label, USED and FREE in
 bytes. `"TITLE"` is left out when the volume has no title or it is empty; `, read-only` is added when the volume
-can't be written, for whatever reason. There is one header per volume (so `--vol=all` gives one per volume), not one
+can't be written, for whatever reason. `cpmdw` adds `(detected - see info)` after the label (`cpm: CP/M (detected - see info), ...`) when the disc's layout is not in its library: the reading is the program's own, and `info` shows it. There is one header per volume (so `--vol=all` gives one per volume), not one
 per directory under `-R`. `-d` prints no header.
 
 Then one line per entry, with the fields in this order:
@@ -100,16 +100,17 @@ Then one line per entry, with the fields in this order:
   (archive). The letters come from each attribute's `AttrSpec` (a new one-letter field, not the `sample` width hint),
   only for attributes shown as list columns (`column`), in the order the volume lists its attributes, except where a
   volume overrides that order (ADFS lists them R W L E, so it overrides to L W R E; its spec order, and with it JSON's
-  `fileAttrSpecs`, stays as it is). The column is as wide as the widest entry, and it is left out when no entry has
-  any set.
+  `fileAttrSpecs`, stays as it is). The column is as wide as the widest entry or as the filesystem has letters,
+  whichever is more, and it stays when no entry has any set (so a CP/M listing keeps its shape).
 - **SIZE** is in bytes, right-aligned, padded to the widest size in the listing. A directory's is blank. Where the
   filesystem knows the size only to a record (`sizeExact` false: a CP/M file with no exact byte count), it is shown
-  with `~` before it (`~1536`); the `~` counts in the width, so the numbers still line up on the right.
+  with `~` before it (`~1536`); the `~` counts in the width, so the numbers still line up on the right. CP/M shows
+  the plain number, as the program's own list does (`Volume::marksInexactSizes` is false for it), so it never has `~`.
 - **DATE** is `yyyy-MM-dd HH:mm`. It is shown only when the entry has one (an ADFS file whose load and exec addresses
   carry a date stamp, a FAT file, a CP/M 3 file on a disc with time stamps). The column is left out when no entry has
   one.
 
-A column with no value in any entry is left out, so a plain CP/M listing has only names and sizes. Columns are
+A column with no value in any entry is left out, except ATTRIBUTES where the filesystem has attributes to show. Columns are
 separated by two spaces, and trailing spaces are trimmed.
 
 Without `-R`, `ls` lists only the named directory, or the root when no path is given. `-R` lists every directory below
@@ -121,10 +122,10 @@ then name. Under `-R` the sort applies within each directory. JSON keeps the ord
 Example of the CP/M layout (illustrative):
 
     cpm: CP/M, 39936 used, 206848 free
-    0:PAUSE.Z8K   13952
-    0:XCON.Z8K    19584
-    0:ZCC.Z8K     17664
-    3:NOTES.TXT  ~1536
+    0:PAUSE.Z8K      13952
+    0:XCON.Z8K   R   19584
+    0:ZCC.Z8K        17664
+    3:NOTES.TXT       1536
 
 Example of the ADFS layout (illustrative):
 
@@ -142,7 +143,8 @@ Example of the ADFS layout (illustrative):
    one indented `also: <description> (<tier>)` line for each other reading. The other readings are what `--fs=ID`
    chooses between after exit 8, so they stay in the text.
 3. **Format**, by program:
-   - `cpmdw`: `format: <name> (<origin>)`, then the format summary indented. The origin is what the format library
+   - `cpmdw`: `format: <name> (<origin>)`, then the format summary indented; a layout in no library (named `detected`) is
+     `format: custom, not in the library`. The origin is what the format library
      records: `built-in` or `cpmtools` (the two parts of the library), the path of a `--diskdefs` file, or `detected`
      (a layout worked out from the disc, in no library).
    - `acorndw`: `sides: <order>, <how>` for a double-sided image, where `<order>` is `interleaved` or `sequential`

@@ -454,7 +454,9 @@ void infoText(Ctx &c, const Result &res) {
 
     const QJsonObject fmt = app["format"].toObject(), sides = app["sides"].toObject();
     if (!fmt.isEmpty()) {
-        line(QString("format: %1 (%2)").arg(fmt["name"].toString(), fmt["origin"].toString()));
+        const QString name = fmt["name"].toString();
+        if (name == "detected" || name == "by-hand") line("format: custom, not in the library");      // (its name and origin are both "detected")
+        else line(QString("format: %1 (%2)").arg(name, fmt["origin"].toString()));
         if (!fmt["summary"].toString().isEmpty()) indented(fmt["summary"].toString());
     } else if (sides["doubleSided"].toBool()) {
         line(QString("sides: %1, %2").arg(sides["order"].toString(), sides["forced"].toBool() ? "forced" : sides["confirmed"].toBool() ? "detected" : "assumed"));
@@ -472,7 +474,8 @@ void infoText(Ctx &c, const Result &res) {
     if (app.contains("fromLibrary") && !app["fromLibrary"].toBool() && !fmt["diskdef"].toString().isEmpty()) {
         line("definition:");
         for (const QString &l : fmt["diskdef"].toString().split('\n')) indented(l);
-        indented("Save this definition to a file, give it a name, and pass --diskdefs=FILE --format=NAME with each command that changes the disc.");
+        indented("To change this disc, save the definition to a file, give it a name,");
+        indented("and pass --diskdefs=FILE --format=NAME with each command.");
     }
 
     for (const QJsonValue &v : res["volumes"].toArray()) {
@@ -481,7 +484,7 @@ void infoText(Ctx &c, const Result &res) {
         for (int m = 0; m < c.img->disc().mounts().size(); ++m) {
             if (c.img->volName(m) != o["vol"].toString()) continue;
             const WriteBlock w = writeBlock(c.img.get(), m);
-            if (w.blocked()) head += w.why.isEmpty() ? ", read-only" : ", read-only: " + w.why;
+            if (w.blocked()) head += w.why.isEmpty() || w.why == c.img->readOnlyWhy() ? ", read-only" : ", read-only: " + w.why;     // (the reading has said why)
         }
         line(head);
         if (!i["title"].toString().isEmpty()) indented(QString("title: \"%1\"").arg(i["title"].toString()));
@@ -516,6 +519,7 @@ bool cmdCheck(Ctx &c, const Parsed &p, const QStringList &, Result *res) {
 struct LsRow {
     QStringList key;                     // sort key: the levels of the path, lower case (user areas in number order)
     QString name, type, attrs, size, date;
+    int attrWidth = 0;                   // letters the volume can show: its attribute column stays even if none is set
 };
 
 struct LsBlock {                         // what is listed of one volume: one header, then its entries
@@ -565,12 +569,15 @@ void emitEntry(const VolRef &r, const Path &dir, const fs::Entry &e, bool withVo
     row.name = (withVol ? r.name + ":" : QString()) + r.v->displayPath(p);
     row.type = e.isDir() ? "D" : "";
     row.attrs = attrSummary(r, e);
-    if (!e.isDir()) row.size = (e.sizeExact ? QString() : QString("~")) + QString::number(e.size);
+    for (const fs::AttrSpec &a : r.v->fileAttrs())
+        if (a.type == fs::AttrSpec::Bool && a.column && !a.letter.isEmpty()) ++row.attrWidth;
+    if (!e.isDir()) row.size = (e.sizeExact || !r.v->marksInexactSizes() ? QString() : QString("~")) + QString::number(e.size);
     if (e.modified.isValid()) row.date = e.modified.toString("yyyy-MM-dd HH:mm");
     out->block().rows.append(row);
 }
 
-// NAME  TYPE  ATTRIBUTES  SIZE  DATE: a column that is empty in every row is left out, the others are as wide as their
+// NAME  TYPE  ATTRIBUTES  SIZE  DATE: a column that is empty in every row is left out (the attribute column stays
+// wherever the volume has attributes to show, so a listing keeps its shape), the others are as wide as their
 // widest cell, two spaces between, nothing trailing.
 QStringList lsLines(QVector<LsRow> rows) {
     std::stable_sort(rows.begin(), rows.end(), rowLess);
@@ -578,7 +585,7 @@ QStringList lsLines(QVector<LsRow> rows) {
     bool anyType = false, anyDate = false;
     for (const LsRow &r : rows) {
         wName = qMax(wName, int(r.name.size()));
-        wAttrs = qMax(wAttrs, int(r.attrs.size()));
+        wAttrs = qMax(wAttrs, qMax(int(r.attrs.size()), r.attrWidth));
         wSize = qMax(wSize, int(r.size.size()));
         anyType = anyType || !r.type.isEmpty();
         anyDate = anyDate || !r.date.isEmpty();
@@ -601,6 +608,8 @@ QStringList lsLines(QVector<LsRow> rows) {
 QString lsHeader(OpenedImage *img, const VolRef &r) {
     const fs::VolumeInfo vi = r.v->info();
     QString h = QString("%1: %2").arg(r.name, r.label);
+    const QString note = img->volumeNote(r.mount);
+    if (!note.isEmpty()) h += QString(" (%1)").arg(note);
     if (!vi.title.isEmpty()) h += QString(" \"%1\"").arg(vi.title);
     h += QString(", %1 used, %2 free").arg(vi.total - vi.free).arg(vi.free);
     if (writeBlock(img, r.mount).blocked()) h += ", read-only";
