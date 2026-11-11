@@ -1,5 +1,6 @@
 // Part of DiskWranglerCore - Copyright (C) 2026 Daniel Jameson - GPL v3 or later
-// uitest: the window kit (5c, 5e, 5f: rows, Delete, Extract, the import session, Properties, disc attributes, Check),
+// uitest: the window kit (5c, 5e, 5f, 5g: rows, Delete, Extract, the import session, Properties, disc attributes, Check,
+// the open pipeline with the hand-over's Locate...),
 // the small helpers both programs use (file dialog filters, sizes, root labels, delete keys, tree column
 // layout), the plain text and hex views, the viewer registry (order, replacing, choosing the view to open on) and the
 // viewer dialog built on it (view menu, a view's check boxes, the 1 MiB limit, "Save as text" names). Run offscreen.
@@ -8,6 +9,9 @@
 #include <QComboBox>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QTimer>
 #include <QTreeWidget>
 #include <cstdio>
 #include <diskwrangler/text/textviews.h>
@@ -24,6 +28,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <diskwrangler/ui/discwindow.h>
+#include <diskwrangler/ui/handoffdialog.h>
 #include <diskwrangler/xfer/retrofiles.h>
 #include "memvolume.h"
 
@@ -148,6 +153,282 @@ protected:
         DiscWindow::showCheck(all, per);
     }
 };
+
+// A window whose detection is scripted, and which records what the open pipeline asked of it (step 5g).
+class OpenWindow : public KitWindow {
+public:
+    explicit OpenWindow(memvol::MemDocument *d) : KitWindow(d) {}
+    dw::fs::Verdict verdict;                                  // what detectImage gives
+    bool readable = true;                                     // false: detectImage fails
+    bool opens = true;                                        // openDocument's answer
+    QStringList calls;                                        // the hooks called, in order
+    QString opened;                                           // the description of the reading openDocument was given
+    QString located;                                          // what Locate...'s chooser answers
+    QList<OpenWindow *> made;                                 // windows createWindow made
+    bool closeFailed = true;
+    QVector<NotOpened::Button> buttons;                       // the program's buttons on the hand-over message
+    QString startedTitle;                                     // ... and its title for the "opened in" message
+protected:
+    bool detectImage(const QString &, int force, dw::fs::Verdict *v) override {
+        calls << QString("detect %1").arg(force);
+        *v = verdict;
+        return readable;
+    }
+    bool openDocument(const QString &, const dw::fs::Verdict &, const dw::fs::Candidate *pick, int) override {
+        calls << "open";
+        opened = pick ? pick->description : QString("(none)");
+        return opens;
+    }
+    void openStopped() override { calls << "stopped"; }
+    void afterOpen(const QString &) override { calls << "after"; }
+    NotOpened handOverMessage(const QString &path, const dw::fs::Verdict &v, const dw::fs::Candidate &pick) const override {
+        NotOpened m = DiscWindow::handOverMessage(path, v, pick);
+        m.buttons = buttons;
+        m.startedTitle = startedTitle;
+        return m;
+    }
+    QString locateProgram(const dw::fs::OtherApp &) override { return located; }
+    DiscWindow *createWindow() override {
+        auto *w = new OpenWindow(new memvol::MemDocument(1));
+        w->verdict = verdict;
+        w->opens = opens;
+        made << w;
+        return w;
+    }
+    bool closeFailedWindow() const override { return closeFailed; }
+};
+
+// Answers the message boxes that come up, in turn: each answer is a button's text (without &); records each box as
+// "title|text|informative|buttons".
+class BoxAnswerer : public QObject {
+public:
+    QStringList answers, seen;
+    BoxAnswerer() {
+        auto *t = new QTimer(this);
+        connect(t, &QTimer::timeout, this, [this] {
+            auto *b = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!b || answers.isEmpty() || b->property("answered").toBool()) return;
+            b->setProperty("answered", true);
+            QStringList names;
+            QAbstractButton *pick = nullptr;
+            for (QAbstractButton *x : b->buttons()) {
+                const QString n = x->text().remove('&');
+                names << n;
+                if (!pick && n == answers.first()) pick = x;
+            }
+            names.sort();
+            seen << b->windowTitle() + "|" + b->text() + "|" + b->informativeText() + "|" + names.join(",");
+            const QString a = answers.takeFirst();
+            if (pick) pick->click(); else b->reject();
+        });
+        t->start(20);
+    }
+};
+
+static dw::fs::Candidate candidate(const QString &desc, dw::fs::Tier t, const dw::fs::OtherApp &owner = dw::fs::OtherApp()) {
+    dw::fs::Candidate c;
+    c.fsId = owner.isNull() ? "mem" : "other";
+    c.name = owner.isNull() ? "MEM" : "Other";
+    c.description = desc;
+    c.tier = t;
+    c.owner = owner;
+    c.probe = owner.isNull() ? "mem" : "other";
+    return c;
+}
+
+static void openTests() {
+#ifdef Q_OS_UNIX
+    printf("== window kit: the open pipeline, the hand-over and Locate... (step 5g)\n");
+    using dw::fs::Verdict;
+    using dw::fs::Tier;
+    QCoreApplication::setOrganizationName("diskwranglercore-uitest");
+    QCoreApplication::setApplicationName("openpipeline");
+    QTemporaryDir tmp;
+    const dw::fs::OtherApp other{"no-such-wrangler-xyz", "No Such Wrangler", "No Such Wrangler", "https://example.org/nsw"};
+    AppSettings().remove("otherApps/" + other.id);
+    AppSettings().remove("handoff/quiet/" + other.id);
+    const QString img = tmp.filePath("disc.img"), out = tmp.filePath("out.txt");
+    QFile(img).open(QIODevice::WriteOnly);
+    // the other program: a script that writes what it was given; one under the name the lookup expects, one not
+    auto script = [&](const QString &name) {
+        const QString p = tmp.filePath(name);
+        QFile s(p);
+        s.open(QIODevice::WriteOnly);
+        s.write(QString("#!/bin/sh\nprintf '%s\\n' \"$1\" > '%1.part' && mv '%1.part' '%1'\n").arg(out).toUtf8());
+        s.close();
+        s.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        return p;
+    };
+    const QString prog = script(other.id), wrong = script("fakewrangler");
+    const QString notRunnable = tmp.filePath("sub/" + other.id);
+    QDir(tmp.path()).mkdir("sub");
+    QFile(notRunnable).open(QIODevice::WriteOnly);
+    auto waitOut = [&] {
+        QElapsedTimer t;
+        t.start();
+        while (!QFile::exists(out) && t.elapsed() < 10000) QThread::msleep(20);
+        QFile o(out);
+        const QString got = o.open(QIODevice::ReadOnly) ? QString::fromUtf8(o.readAll()).trimmed() : QString();
+        QFile::remove(out);
+        return got;
+    };
+
+    memvol::MemDocument doc(1, img);
+    OpenWindow w(&doc);
+    const dw::fs::Candidate mine = candidate("a MEM disc", Tier::Certain), mine2 = candidate("a MEM disc, read another way", Tier::Likely),
+                            theirs = candidate("a disc of the other program", Tier::Likely, other);
+    QString why;
+
+    // the settings: what Locate... stores
+    CHECK(!dw::app::isOtherApp(wrong, other, &why) && why.contains("is called no-such-wrangler-xyz"), qPrintable("a file of another name isn't the program: " + why));
+    CHECK(!dw::app::isOtherApp(notRunnable, other, &why) && why == "it is not a program that can be run", qPrintable("nor one that can't be run: " + why));
+    CHECK(!dw::app::setOtherAppPath(other, wrong, &why) && AppSettings().value("otherApps/" + other.id).toString().isEmpty(), "neither is stored");
+    CHECK(dw::app::isOtherApp(prog, other, &why) && dw::app::isOtherApp(tmp.filePath("sub/../" + other.id), other, &why), "the program itself is");
+
+    // Open: detection's verdict, then the program opens the best reading
+    dw::ui::DiscWindow::autoAnswer = true;
+    w.verdict = dw::fs::decide({mine});
+    CHECK(w.openFile(img, 1) && w.calls == QStringList({"detect 1", "open", "after"}) && w.opened == "a MEM disc",
+          qPrintable("Open: detect (with force), open the best reading, afterOpen: " + w.calls.join(", ")));
+    w.calls.clear();
+    w.readable = false;
+    CHECK(!w.openFile(img) && w.calls == QStringList({"detect -1"}), "a file detection can't read: nothing else is asked");
+    w.readable = true;
+    w.calls.clear();
+    w.opens = false;
+    CHECK(!w.openFile(img) && w.calls == QStringList({"detect -1", "open"}), "a reading the program can't open: false, no afterOpen");
+    w.opens = true;
+    w.calls.clear();
+    w.verdict = dw::fs::decide({});
+    CHECK(w.verdict.action == Verdict::None && w.openFile(img) && w.opened == "(none)", "nothing recognised it: the program is asked with no reading");
+
+    // Ask: two readings from two probes equally likely
+    dw::fs::Candidate a = mine2, b = mine2;
+    b.description = "a MEM disc, the rival";
+    b.probe = "mem2";
+    w.verdict = dw::fs::decide({a, b});
+    w.calls.clear();
+    CHECK(w.verdict.action == Verdict::Ask && w.openFile(img) && w.opened == "a MEM disc, read another way",
+          "Ask under autoAnswer: the first reading");
+    dw::ui::DiscWindow::autoAnswer = false;
+    {
+        BoxAnswerer ans;
+        ans.answers = QStringList({"Cancel"});
+        w.calls.clear();
+        CHECK(!w.openFile(img) && w.calls == QStringList({"detect -1", "stopped"}) && ans.seen.size() == 1
+                  && ans.seen[0].startsWith("Which kind of disc?|disc.img could be either of these"),
+              qPrintable("Ask, cancelled: openStopped, nothing opened: " + ans.seen.join(" / ")));
+        ans.answers = QStringList({"Open as MEM"});
+        // both buttons say "Open as MEM": the first is the best reading
+        CHECK(w.openFile(img) && w.opened == "a MEM disc, read another way", "Ask, answered: that reading is opened");
+    }
+
+    // Handoff: the other program owns it
+    w.verdict = dw::fs::decide({theirs});
+    CHECK(w.verdict.action == Verdict::Handoff, "a disc another program owns: hand-over");
+    dw::ui::DiscWindow::autoAnswer = true;
+    w.calls.clear();
+    CHECK(!w.openFile(img) && w.calls == QStringList({"detect -1", "stopped"}) && !QFile::exists(out),
+          "under autoAnswer: not started, nothing shown, the window put back");
+    dw::ui::DiscWindow::autoAnswer = false;
+    {
+        BoxAnswerer ans;
+        ans.answers = QStringList({"OK"});
+        CHECK(!w.openFile(img) && ans.seen.size() == 1, "not found: one message");
+        CHECK(ans.seen.value(0) == "Open|disc.img: a disc of the other program|<a href=\"https://example.org/nsw\">Get No Such Wrangler</a>|Locate...,OK",
+              qPrintable("... the program's words, the link to get it, and Locate... (deliberate change 7): " + ans.seen.value(0)));
+        CHECK(AppSettings().value("otherApps/" + other.id).toString().isEmpty() && !QFile::exists(out), "OK: nothing stored, nothing started");
+
+        // the program's own button
+        bool ran = false;
+        w.buttons = {{"Choose a format...", [&ran] { ran = true; }}};
+        ans.answers = QStringList({"Choose a format..."});
+        w.openFile(img);
+        CHECK(ran && ans.seen.value(1).endsWith("|Choose a format...,Locate...,OK"), qPrintable("a program's button is on it and runs: " + ans.seen.value(1)));
+        w.buttons.clear();
+
+        // Locate..., a file that isn't the program: said so, nothing stored
+        w.located = wrong;
+        ans.answers = QStringList({"Locate...", "OK"});
+        CHECK(!w.openFile(img) && ans.seen.size() == 4 && ans.seen[3].startsWith("Locate No Such Wrangler|" + wrong + " is not No Such Wrangler: its program file is called"),
+              qPrintable("Locate..., the wrong file: " + ans.seen.value(3)));
+        CHECK(AppSettings().value("otherApps/" + other.id).toString().isEmpty() && !QFile::exists(out), "... not stored, not started");
+
+        // Locate..., cancelled
+        w.located.clear();
+        ans.answers = QStringList({"Locate..."});
+        w.openFile(img);
+        CHECK(ans.answers.isEmpty() && AppSettings().value("otherApps/" + other.id).toString().isEmpty(), "Locate..., the chooser cancelled: nothing stored");
+
+        // Locate..., the program: stored, started with the image, and said so
+        w.located = prog;
+        ans.answers = QStringList({"Locate...", "OK"});
+        const int before = ans.seen.size();
+        CHECK(!w.openFile(img), "Locate...: still not opened here");
+        CHECK(AppSettings().value("otherApps/" + other.id).toString() == prog, "the program is stored as otherApps/<id>");
+        CHECK(waitOut() == img, "it is started with the image");
+        CHECK(ans.seen.size() == before + 2 && ans.seen.last().startsWith("Opened in No Such Wrangler|This is an Other disc, so it has been opened in No Such Wrangler.|disc.img: "),
+              qPrintable("... and the window says so: " + ans.seen.value(ans.seen.size() - 1)));
+
+        // found now: started straight away, the message titled as the program says
+        w.startedTitle = "A disc of theirs";
+        ans.answers = QStringList({"OK"});
+        CHECK(!w.openFile(img) && waitOut() == img && ans.seen.last().startsWith("A disc of theirs|This is an Other disc, so it has been opened in No Such Wrangler.|"),
+              qPrintable("found: started at once, the message titled by the program (startedTitle): " + ans.seen.last()));
+        w.startedTitle.clear();
+
+        // ... and with "Don't show this again", no message at all
+        AppSettings().setValue("handoff/quiet/" + other.id, true);
+        ans.answers.clear();
+        const int seen = ans.seen.size();
+        w.calls.clear();
+        CHECK(!w.openFile(img) && waitOut() == img && ans.seen.size() == seen && w.calls == QStringList({"detect -1", "stopped"}),
+              "the next time: started, no message (\"Don't show this again\")");
+
+        // a stored path that no longer works is ignored, and Locate... is offered again
+        QFile::remove(prog);
+        CHECK(dw::app::findOtherApp(other).isEmpty(), "a stored program that has gone is ignored");
+        ans.answers = QStringList({"OK"});
+        w.openFile(img);
+        CHECK(ans.seen.last().endsWith("|Locate...,OK"), "... so Locate... is offered again");
+        script(other.id);
+
+        // the program was handed the image by the other one: found, so no Locate...
+        qputenv(dw::app::HandoffVariable, img.toUtf8());
+        ans.answers = QStringList({"OK"});
+        w.openFile(img);
+        CHECK(ans.seen.last().endsWith("|OK") && !ans.seen.last().contains("Locate") && !QFile::exists(out),
+              qPrintable("handed back: not started again, and no Locate... (it was found): " + ans.seen.last()));
+        qunsetenv(dw::app::HandoffVariable);
+
+        // handOff's own message (a program that gives its title and text) has Locate... too
+        AppSettings().remove("otherApps/" + other.id);
+        QFile::remove(tmp.filePath(other.id));
+        ans.answers = QStringList({"OK"});
+        CHECK(!dw::ui::handOff(&w, theirs, img, "A disc of theirs", "Open it with No Such Wrangler.")
+                  && ans.seen.last() == "A disc of theirs|Open it with No Such Wrangler.|<a href=\"https://example.org/nsw\">Get No Such Wrangler</a>|Locate...,OK",
+              qPrintable("handOff's own message: " + ans.seen.last()));
+    }
+
+    // a new window: Open... in an empty window opens there; else in a new one, closed again if it fails
+    dw::ui::DiscWindow::autoAnswer = true;
+    w.verdict = dw::fs::decide({mine});
+    doc.closed = true;
+    CHECK(w.openInWindow(img) == &w && w.made.isEmpty(), "no image open: Open... opens in this window");
+    doc.closed = false;
+    dw::ui::DiscWindow *nw = w.openInWindow(img);
+    CHECK(nw && nw != &w && w.made.size() == 1 && nw == w.made[0], "an image open: in a new window");
+    w.opens = false;
+    w.made.clear();
+    CHECK(!w.openInWindow(img) && w.made.size() == 1 && !w.made[0]->isVisible(), "a new window that couldn't open it is closed");
+    w.closeFailed = false;
+    w.made.clear();
+    CHECK(!w.openInWindow(img) && w.made.size() == 1, "... unless the program keeps it");
+    dw::ui::DiscWindow::autoAnswer = false;
+    AppSettings().remove("otherApps/" + other.id);
+    AppSettings().remove("handoff/quiet/" + other.id);
+#endif
+}
 
 static QStringList rowTexts(QTreeWidget *t) {
     QStringList out;
@@ -647,6 +928,7 @@ int main(int argc, char **argv) {
 #endif
 
     kitTests();
+    openTests();
 
     printf(failures ? "%d FAILURES\n" : "all ok\n", failures);
     return failures ? 1 : 0;

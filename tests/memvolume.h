@@ -210,7 +210,8 @@ public:
 
     dw::fs::Disc &disc() override { return m_disc; }
     const dw::fs::Disc &disc() const override { return m_disc; }
-    bool isOpen() const override { return true; }
+    bool isOpen() const override { return !closed; }
+    bool closed = false;                         // no image open (the tests of opening, step 5g)
     QString path() const override { return m_path; }
     // Nothing is written anywhere: a save remembers the bytes as they are, and the document is changed again when
     // they differ.
