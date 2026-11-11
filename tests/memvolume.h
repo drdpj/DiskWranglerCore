@@ -19,7 +19,9 @@
 
 // MemVolume: a filesystem with directories, kept as a JSON document in a region of an in-memory raw container, so a
 // Disc's transactions really roll it back (the container's staged writes are put back and the volume reads the
-// document again). One "locked" attribute: a locked file can't be removed or replaced. MemDocument: a Document over a
+// document again). One "locked" attribute: a locked file can't be removed or replaced (or renamed). A title (a volume
+// attribute, up to 10 characters). check() finds an error in every file named "bad..." and a warning in every file
+// named "warn..." (step 5f). MemDocument: a Document over a
 // Disc of one or more MemVolumes (two in one group = two root rows in one pane, like CP/M's sides). For the window
 // kit's tests (uitest); later series' tests reuse it.
 
@@ -62,8 +64,15 @@ public:
         l.retroFamily = "mem"; l.retroKey = "locked";
         return {l};
     }
+    QVector<dw::fs::AttrSpec> volumeAttrs() const override {
+        dw::fs::AttrSpec t;
+        t.key = "title"; t.label = "Title"; t.type = dw::fs::AttrSpec::Text;
+        return {t};
+    }
+    dw::fs::AttrValues volumeValues() const override { return {{"title", m_title}}; }
     const dw::fs::NameRules &names() const override { return m_names; }
-    dw::fs::VolumeInfo info() const override { dw::fs::VolumeInfo i; i.total = m_size; return i; }
+    dw::fs::VolumeInfo info() const override { dw::fs::VolumeInfo i; i.total = m_size; i.title = m_title; return i; }
+    QString title() const { return m_title; }
 
     bool list(const dw::fs::Path &dir, QVector<dw::fs::Entry> *out, QString *err) const override {
         out->clear();
@@ -109,16 +118,49 @@ public:
         if (a.contains("locked")) m_nodes[key(p)].locked = a["locked"].toBool();
         return store(err);
     }
-    dw::fs::Report check() const override { return dw::fs::Report(); }
+    bool rename(const dw::fs::Path &from, const dw::fs::Path &to, QString *err) override {
+        const QString f = key(from), t = key(to);
+        if (!m_nodes.contains(f)) { *err = "no such file: " + f; return false; }
+        if (m_nodes[f].locked) { *err = f + " is locked"; return false; }
+        if (m_nodes.contains(t)) { *err = t + " already exists"; return false; }
+        if (!to.parent().isRoot() && !(m_nodes.contains(key(to.parent())) && m_nodes[key(to.parent())].dir)) {
+            *err = "no such directory: " + key(to.parent());
+            return false;
+        }
+        for (const QString &c : m_nodes.keys())
+            if (c.startsWith(f + "/")) { m_nodes[t + c.mid(f.size())] = m_nodes[c]; m_nodes.remove(c); }
+        m_nodes[t] = m_nodes[f];
+        m_nodes.remove(f);
+        return store(err);
+    }
+    bool setVolumeAttrs(const dw::fs::AttrValues &a, QString *err) override {
+        for (auto it = a.begin(); it != a.end(); ++it) {
+            if (it.key() != "title") { *err = "no such attribute: " + it.key(); return false; }
+            if (it.value().toString().size() > 10) { *err = "a title has at most 10 characters"; return false; }
+            m_title = it.value().toString();
+        }
+        return store(err);
+    }
+    dw::fs::Report check() const override {
+        dw::fs::Report r;
+        for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+            const QString n = dw::fs::Path::fromString(it.key()).name();
+            if (n.startsWith("bad")) r.errors << it.key() + ": bad";
+            if (n.startsWith("warn")) r.warnings << it.key() + ": odd";
+        }
+        return r;
+    }
     bool reload(QString *err) override {
         QByteArray len, doc;
         if (!m_c->readStored(m_off, 4, &len, err)) return false;
         const quint32 n = quint32(uchar(len[0])) | quint32(uchar(len[1])) << 8 | quint32(uchar(len[2])) << 16 | quint32(uchar(len[3])) << 24;
         m_nodes.clear();
+        m_title.clear();
         if (n == 0) return true;
         if (n > quint32(m_size - 4) || !m_c->readStored(m_off + 4, n, &doc, err)) { if (err->isEmpty()) *err = "bad length"; return false; }
         const QJsonObject o = QJsonDocument::fromJson(doc).object();
         for (auto it = o.begin(); it != o.end(); ++it) {
+            if (it.key() == "/title") { m_title = it.value().toString(); continue; }    // no name holds a /
             const QJsonObject v = it.value().toObject();
             m_nodes[it.key()] = Node{v["dir"].toBool(), QByteArray::fromBase64(v["data"].toString().toLatin1()), v["locked"].toBool()};
         }
@@ -131,6 +173,7 @@ private:
         QJsonObject o;
         for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it)
             o[it.key()] = QJsonObject{{"dir", it->dir}, {"data", QString::fromLatin1(it->data.toBase64())}, {"locked", it->locked}};
+        if (!m_title.isEmpty()) o["/title"] = m_title;
         const QByteArray doc = QJsonDocument(o).toJson(QJsonDocument::Compact);
         if (doc.size() + 4 > m_size) { *err = "the volume is full"; return false; }
         const quint32 n = quint32(doc.size());
@@ -141,6 +184,7 @@ private:
     dw::device::Container *m_c;
     qint64 m_off, m_size;
     QMap<QString, Node> m_nodes;
+    QString m_title;
     PlainNames m_names;
 };
 

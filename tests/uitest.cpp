@@ -1,5 +1,6 @@
 // Part of DiskWranglerCore - Copyright (C) 2026 Daniel Jameson - GPL v3 or later
-// uitest: the small helpers both programs use (file dialog filters, sizes, root labels, delete keys, tree column
+// uitest: the window kit (5c, 5e, 5f: rows, Delete, Extract, the import session, Properties, disc attributes, Check),
+// the small helpers both programs use (file dialog filters, sizes, root labels, delete keys, tree column
 // layout), the plain text and hex views, the viewer registry (order, replacing, choosing the view to open on) and the
 // viewer dialog built on it (view menu, a view's check boxes, the 1 MiB limit, "Save as text" names). Run offscreen.
 #include <QApplication>
@@ -117,6 +118,35 @@ protected:
         return answers.isEmpty() ? dw::xfer::Conflict::Cancel : answers.takeFirst();
     }
     void importSummary(const dw::xfer::ImportResult &r) override { ++summaries; last = r; }
+};
+
+// A window whose Properties and disc-attribute dialogs are scripted, and which records what Check showed (step 5f).
+class PropsWindow : public KitWindow {
+public:
+    explicit PropsWindow(memvol::MemDocument *d) : KitWindow(d) {}
+    bool accept = true;                                       // the Properties dialog's answer
+    PropertiesEdit next;                                      // ... and what it changes
+    QVector<Item> asked;                                      // the items it was shown
+    int dialogs = 0;
+    bool volAccept = true;
+    VolumeEdit nextVol;
+    QStringList volAsked;                                     // "mount:key"
+    dw::fs::Report checkAll;
+    QVector<dw::fs::Report> checkPer;
+    QString checkShown;
+protected:
+    bool propertiesEditor(const QVector<Item> &items, PropertiesEdit *e) override { ++dialogs; asked = items; *e = next; return accept; }
+    bool volumeEditor(int m, const QString &k, VolumeEdit *e) override {
+        volAsked << QString("%1:%2").arg(m).arg(k);
+        *e = nextVol;
+        return volAccept;
+    }
+    void showCheck(const dw::fs::Report &all, const QVector<dw::fs::Report> &per) override {
+        checkAll = all;
+        checkPer = per;
+        checkShown = checkText(all, per);
+        DiscWindow::showCheck(all, per);
+    }
 };
 
 static QStringList rowTexts(QTreeWidget *t) {
@@ -364,6 +394,122 @@ static void kitTests() {
         dw::ui::ImportSession s(&doc.disc(), 0, h);
         r = s.run({file("a", "A10"), file("solo", "s")}, {}, Path());
         CHECK(r.skipped == 1 && r.added == 1 && v->read(Path({"a"}), &got, &err) && got == "A9", "a session without a question: the options decide");
+    }
+
+    printf("== window kit: Properties, disc attributes and Check as hooks (step 5f)\n");
+    {
+        using Change = dw::ui::DiscWindow::PropertyChange;
+        memvol::MemDocument doc(2, "/tmp/props.img");
+        auto *v = doc.vol(0);
+        v->write(Path(), "a", "A", {}, QDateTime(), false, &err);
+        v->write(Path(), "b", "B", {}, QDateTime(), false, &err);
+        v->write(Path(), "c", "C", {{"locked", true}}, QDateTime(), false, &err);
+        v->mkdir(Path(), "dir", &err);
+        v->write(Path({"dir"}), "d", "D", {}, QDateTime(), false, &err);
+        doc.vol(1)->write(Path(), "e", "E", {}, QDateTime(), false, &err);
+        doc.markClean();
+        PropsWindow w(&doc);
+        dw::ui::VolumePane *p = w.pane();
+        dw::fs::Entry e;
+        QByteArray got;
+
+        // the items: the selection's files (a folder stands for those under it), across both mounts
+        p->findRow(0, Path({"dir"}))->setSelected(true);
+        p->findRow(0, Path({"a"}))->setSelected(true);
+        p->findRow(1, Path({"e"}))->setSelected(true);
+        w.accept = false;
+        w.editProperties();
+        CHECK(w.dialogs == 1 && w.asked.size() == 3 && w.asked.contains(Item(0, Path({"dir", "d"}))) && w.asked.contains(Item(0, Path({"a"})))
+                  && w.asked.contains(Item(1, Path({"e"}))),
+              "the dialog is shown the selected files, a folder standing for its files, from both mounts");
+        CHECK(!doc.dirty(), "cancelled: nothing changes");
+
+        // several files, one transaction: attributes, a rename, a move to another folder, a file on the other mount
+        w.accept = true;
+        Change c1; c1.item = Item(0, Path({"a"})); c1.attrs = {{"locked", true}};
+        Change c2; c2.item = Item(0, Path({"b"})); c2.to = Path({"b2"});
+        Change c3; c3.item = Item(0, Path({"dir", "d"})); c3.to = Path({"d"});
+        Change c4; c4.item = Item(1, Path({"e"})); c4.attrs = {{"locked", true}}; c4.to = Path({"e"});   // `to` the same: no rename
+        w.next.changes = {c1, c2, c3, c4};
+        w.editProperties();
+        CHECK(v->stat(Path({"a"}), &e, &err) && e.attrs.value("locked").toBool() && v->stat(Path({"b2"}), &e, &err)
+                  && !v->stat(Path({"b"}), &e, &err) && v->read(Path({"d"}), &got, &err) && got == "D"
+                  && doc.vol(1)->stat(Path({"e"}), &e, &err) && e.attrs.value("locked").toBool(),
+              "the changes are made: attributes set, renamed, moved out of the folder, on both mounts");
+        CHECK(doc.dirty() && p->findRow(0, Path({"b2"})) && !p->findRow(0, Path({"b"})) && p->findRow(0, Path({"d"})),
+              "the document is changed and the rows are refreshed");
+
+        // a change refused half way: everything is put back, the program's words
+        doc.markClean();
+        w.shown.clear();
+        Change r1; r1.item = Item(0, Path({"b2"})); r1.attrs = {{"locked", true}};
+        Change r2; r2.item = Item(0, Path({"c"})); r2.to = Path({"c2"});                // c is locked: the rename is refused
+        w.next.changes = {r1, r2};
+        w.editProperties();
+        CHECK(v->stat(Path({"b2"}), &e, &err) && !e.attrs.value("locked").toBool() && v->stat(Path({"c"}), &e, &err) && !doc.dirty(),
+              "a refused change: the attribute set before it is put back, nothing is staged");
+        CHECK(!w.shown.isEmpty() && w.shown.last() == "Properties: Nothing was changed: c is locked",
+              qPrintable("... and the window says so: " + w.shown.value(w.shown.size() - 1)));
+
+        // each on its own: the one that fails is listed, the rest kept
+        w.shown.clear();
+        w.next.eachOnItsOwn = true;
+        w.editProperties();
+        CHECK(v->stat(Path({"b2"}), &e, &err) && e.attrs.value("locked").toBool() && v->stat(Path({"c"}), &e, &err) && doc.dirty(),
+              "eachOnItsOwn: the change that works is kept");
+        CHECK(!w.shown.isEmpty() && w.shown.last() == "Properties: c: c is locked", qPrintable("... the one refused is listed: " + w.shown.value(w.shown.size() - 1)));
+        w.next = dw::ui::DiscWindow::PropertiesEdit();
+
+        // nothing to change: nothing written
+        doc.markClean();
+        Change n1; n1.item = Item(0, Path({"a"}));
+        CHECK(w.applyProperties({n1}, &err) && !doc.dirty(), "a change with no attributes and nowhere to go writes nothing");
+
+        // read-only
+        doc.readOnly = "a test";
+        w.refresh();
+        CHECK(!w.applyProperties({c1}, &err) && err == "read-only: a test", "read-only: Properties refused");
+        CHECK(!w.applyVolumeAttrs(0, {{"title", "X"}}, &err) && err == "read-only: a test", "read-only: a disc attribute refused");
+        doc.readOnly.clear();
+        w.refresh();
+
+        // a disc attribute: the program's dialog, the kit's change
+        doc.markClean();
+        w.shown.clear();
+        w.nextVol.values = {{"title", "HELLO"}};
+        w.nextVol.title = "Disc title";
+        w.editVolume(1, "title");
+        CHECK(w.volAsked == QStringList({"1:title"}) && doc.vol(1)->title() == "HELLO" && doc.vol(0)->title().isEmpty() && doc.dirty(),
+              "editVolume: the dialog is asked for that mount and key; the value set on that mount only");
+        doc.markClean();
+        w.nextVol.values = {{"title", "MUCH TOO LONG"}};
+        w.editVolume(1, "title");
+        CHECK(doc.vol(1)->title() == "HELLO" && !doc.dirty() && !w.shown.isEmpty() && w.shown.last() == "Disc title: a title has at most 10 characters",
+              qPrintable("refused: unchanged, the message titled by the program: " + w.shown.value(w.shown.size() - 1)));
+        w.volAccept = false;
+        w.nextVol.values = {{"title", "NO"}};
+        w.editVolume(1, "title");
+        CHECK(doc.vol(1)->title() == "HELLO" && !doc.dirty(), "cancelled: nothing changes");
+
+        // Check: Disc::validateAll, with each mount's report
+        w.shown.clear();
+        w.checkDisc();
+        CHECK(w.checkAll.ok() && w.checkPer.size() == 2 && w.shown.last() == "Check disc: No problems found.",
+              qPrintable("a clean disc: " + w.shown.value(w.shown.size() - 1)));
+        doc.vol(1)->write(Path(), "bad1", "x", {}, QDateTime(), false, &err);
+        v->write(Path(), "warn1", "x", {}, QDateTime(), false, &err);
+        w.checkDisc();
+        CHECK(!w.checkAll.ok() && w.checkAll.errors == QStringList({"part 1: bad1: bad"}) && w.checkAll.warnings == QStringList({"part 0: warn1: odd"}),
+              "the whole report: each line with its mount's label");
+        CHECK(w.checkPer.size() == 2 && w.checkPer[0].errors.isEmpty() && w.checkPer[0].warnings == QStringList({"warn1: odd"})
+                  && w.checkPer[1].errors == QStringList({"bad1: bad"}),
+              "each mount's own report, as its check() gave it");
+        CHECK(w.checkShown == "Errors:\npart 1: bad1: bad\nWarnings:\npart 0: warn1: odd" && w.shown.last() == "Check disc: Errors:",
+              qPrintable("the default text: " + QString(w.checkShown).replace('\n', '|')));
+        QVector<dw::fs::Report> per;
+        const dw::fs::Report all = doc.disc().validateAll(&per);
+        CHECK(per.size() == 2 && all.errors.size() == 1 && doc.disc().validateAll().errors == all.errors,
+              "Disc::validateAll gives the same with or without the reports per mount");
     }
     dw::ui::DiscWindow::autoAnswer = false;
 }
