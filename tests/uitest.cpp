@@ -100,6 +100,25 @@ private:
     dw::ui::PaneLayout m_layout;
 };
 
+// A window whose import questions are answered from a script, and which records its summaries (step 5e).
+class ImportWindow : public KitWindow {
+public:
+    explicit ImportWindow(memvol::MemDocument *d) : KitWindow(d) {}
+    using DiscWindow::importItems;
+    QList<dw::xfer::Conflict> answers;                        // the next answers to "exists: replace it?"
+    QStringList asked;                                        // the names asked about
+    dw::ui::ImportHooks hooks;
+    int summaries = 0;
+    dw::xfer::ImportResult last;
+protected:
+    dw::ui::ImportHooks importHooks(int) override { return hooks; }
+    dw::xfer::Conflict askReplace(int, const dw::fs::Path &t, const dw::fs::Entry &, const dw::TransferItem &) override {
+        asked << t.name();
+        return answers.isEmpty() ? dw::xfer::Conflict::Cancel : answers.takeFirst();
+    }
+    void importSummary(const dw::xfer::ImportResult &r) override { ++summaries; last = r; }
+};
+
 static QStringList rowTexts(QTreeWidget *t) {
     QStringList out;
     QList<QPair<QTreeWidgetItem *, int>> q;
@@ -231,6 +250,120 @@ static void kitTests() {
         w.refresh();
         CHECK(!p->findRow(1, Path({"d"}))->isSelected() && p->findRow(0, Path({"zero.txt"}))->isSelected(),
               "reselectFolders off: a refresh keeps the files selected, not the folders");
+    }
+
+    printf("== import session: the conflict question, Continue, Cancel, hooks (step 5e)\n");
+    {
+        using dw::xfer::Conflict;
+        auto file = [](const QString &n, const QByteArray &d) { dw::TransferItem t; t.name = n; t.data = d; return t; };
+        memvol::MemDocument doc(1, "/tmp/imp.img");
+        auto *v = doc.vol(0);
+        for (const char *n : {"a", "b", "c", "d"}) v->write(Path(), n, "old", {}, QDateTime(), false, &err);
+        v->write(Path(), "l", "old", {{"locked", true}}, QDateTime(), false, &err);
+        doc.markClean();
+        ImportWindow w(&doc);
+        dw::ui::DiscWindow::autoAnswer = false;               // the scripted answers below are the questions' answers
+        QByteArray got;
+
+        // Replace, Skip; then Replace all: asked once more, the rest replaced without asking
+        w.answers = {Conflict::Replace, Conflict::Skip, Conflict::ReplaceAll};
+        auto r = w.importItems(0, Path(), {file("a", "A1"), file("b", "B1"), file("new1", "N"), file("c", "C1"), file("d", "D1")});
+        CHECK(w.asked == QStringList({"a", "b", "c"}) && r.added == 1 && r.replaced == 3 && r.skipped == 1 && r.errors.isEmpty(),
+              qPrintable("Replace, Skip, Replace all: asked for a, b and c only: " + w.asked.join(",")));
+        CHECK(v->read(Path({"a"}), &got, &err) && got == "A1" && v->read(Path({"b"}), &got, &err) && got == "old" &&
+              v->read(Path({"d"}), &got, &err) && got == "D1", "a and d replaced, b kept");
+        CHECK(w.summaries == 1 && w.pane()->findRow(0, Path({"new1"})), "the window refreshed, then gave its summary");
+
+        // Skip all
+        w.asked.clear();
+        w.answers = {Conflict::SkipAll};
+        r = w.importItems(0, Path(), {file("a", "A2"), file("b", "B2"), file("new2", "N")});
+        CHECK(w.asked == QStringList({"a"}) && r.skipped == 2 && r.added == 1 && v->read(Path({"a"}), &got, &err) && got == "A1",
+              "Skip all: asked once, both skipped, the new file added");
+
+        // Cancel half way: what was done is kept
+        w.asked.clear();
+        w.answers = {Conflict::Cancel};
+        r = w.importItems(0, Path(), {file("new3", "N"), file("a", "A3"), file("new4", "N")});
+        dw::fs::Entry e;
+        CHECK(r.cancelled && r.added == 1 && v->stat(Path({"new3"}), &e, &err) && !v->stat(Path({"new4"}), &e, &err) &&
+              v->read(Path({"a"}), &got, &err) && got == "A1", "Cancel: new3 (before it) kept, a and new4 not done");
+
+        // a locked file is replaced on a Replace answer (unlocked first)
+        w.asked.clear();
+        w.answers = {Conflict::Replace};
+        r = w.importItems(0, Path(), {file("l", "L1")});
+        CHECK(r.replaced == 1 && v->read(Path({"l"}), &got, &err) && got == "L1", "a locked file is replaced on a Replace answer");
+
+        // an error in the middle: recorded with its source, the rest imported, and nothing of the failed file left
+        // (MemVolume takes the file before finding it doesn't fit: the per-file transaction puts that back)
+        w.asked.clear();
+        r = w.importItems(0, Path(), {file("x1", "1"), file("big", QByteArray(70000, 'z')), file("x2", "2")}, {"/h/x1", "/h/big", "/h/x2"});
+        CHECK(r.added == 2 && r.errors.size() == 1 && r.errors[0].from == "/h/big" && r.errors[0].why == "the volume is full" &&
+              r.errors[0].message == "/big: the volume is full", qPrintable("one error, with its source and its reason: " + (r.errors.isEmpty() ? QString() : r.errors[0].message)));
+        CHECK(!v->stat(Path({"big"}), &e, &err) && v->stat(Path({"x2"}), &e, &err), "the file that failed left nothing; the next one was imported");
+
+        // the read-only check, and the program's read errors first
+        doc.readOnly = "a test";
+        dw::xfer::ImportError re;
+        re.kind = dw::xfer::ImportError::Failed;
+        re.message = re.why = "h.txt: can't be read";
+        r = w.importItems(0, Path(), {file("y", "y")}, {}, {re});
+        CHECK(r.added == 0 && r.errors.size() == 2 && r.errors[0].message == "h.txt: can't be read" &&
+              r.errors[1].message == "The disc is read-only: a test" && !v->stat(Path({"y"}), &e, &err), "read-only: nothing written, said after the read errors");
+        doc.readOnly.clear();
+
+        // the program's hooks: prepare, beforeRun, placement, attributes, a folder's files into a directory with a prefix
+        w.hooks.prepare = [](QVector<dw::TransferItem> *items) { for (auto &t : *items) t.name = t.name.toLower(); };
+        int before = 0;
+        w.hooks.beforeRun = [&before](const QVector<dw::TransferItem> &items) { ++before; return items.size() != 3; };
+        r = w.importItems(0, Path(), {file("P", "p"), file("Q", "q"), file("R", "r")});
+        CHECK(before == 1 && r.cancelled && r.added == 0 && !v->stat(Path({"p"}), &e, &err), "beforeRun false: cancelled, nothing written");
+        w.hooks.place = [](const dw::TransferItem &t, const Path &target) {
+            dw::fs::Placement p;
+            p.dir = target.isRoot() ? Path({"in"}) : target;
+            p.name = "f_" + t.name;
+            return p;
+        };
+        w.hooks.attrs = [](const dw::TransferItem &t, const dw::fs::Entry *replacing) {
+            return dw::fs::AttrValues{{"locked", t.name == "keep" ? replacing && replacing->attrs.value("locked").toBool() : true}};
+        };
+        r = w.importItems(0, Path(), {file("P", "p"), file("Q", "q")});
+        CHECK(r.added == 2 && v->read(Path({"in", "f_p"}), &got, &err) && got == "p" && v->stat(Path({"in", "f_q"}), &e, &err) &&
+              e.attrs.value("locked").toBool(), "prepare, then the program's placement (dir made) and attributes");
+        w.hooks = dw::ui::ImportHooks();
+        w.hooks.options.renameRepeats = false;
+        w.asked.clear();
+        w.answers = {Conflict::Replace};
+        r = w.importItems(0, Path(), {file("twice", "1"), file("twice", "2")});
+        CHECK(w.asked == QStringList({"twice"}) && r.added == 1 && r.replaced == 1 && v->read(Path({"twice"}), &got, &err) && got == "2",
+              "renameRepeats off: a name made twice in a run is a file that exists, so it is asked about");
+        w.hooks = dw::ui::ImportHooks();
+        w.asked.clear();
+        w.answers = {Conflict::Skip};
+        r = w.importItems(0, Path(), {file("TWICE", "3")});
+        CHECK(w.asked == QStringList({"TWICE"}) && r.skipped == 1, "the volume's case rule: TWICE is the file twice (asked about)");
+        w.hooks.options.exactNames = true;
+        w.asked.clear();
+        r = w.importItems(0, Path(), {file("TWICE", "3")});
+        CHECK(w.asked.isEmpty() && r.added == 1 && v->read(Path({"TWICE"}), &got, &err) && got == "3",
+              "exactNames: only the same name is the same file (TWICE added beside twice)");
+        w.hooks = dw::ui::ImportHooks();
+        r = w.importItems(0, Path(), {file("again", "1"), file("again", "2")});
+        CHECK(r.added == 2 && r.renamed.size() == 1 && v->stat(Path({"again~1"}), &e, &err), "the default: the second is renamed");
+
+        // autoAnswer: the first, "go ahead" answer (Replace) without asking
+        dw::ui::DiscWindow::autoAnswer = true;
+        w.asked.clear();
+        r = w.importItems(0, Path(), {file("a", "A9")});
+        CHECK(w.asked.isEmpty() && r.replaced == 1 && v->read(Path({"a"}), &got, &err) && got == "A9", "autoAnswer: replaced without asking");
+
+        // the session alone, without a window: no conflict callback, so the options decide (as on the command line)
+        dw::ui::ImportHooks h;
+        h.options.skip = true;
+        dw::ui::ImportSession s(&doc.disc(), 0, h);
+        r = s.run({file("a", "A10"), file("solo", "s")}, {}, Path());
+        CHECK(r.skipped == 1 && r.added == 1 && v->read(Path({"a"}), &got, &err) && got == "A9", "a session without a question: the options decide");
     }
     dw::ui::DiscWindow::autoAnswer = false;
 }
