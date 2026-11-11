@@ -344,6 +344,87 @@ void DiscWindow::deleteSelected() {
     refresh();
 }
 
+// ------------------------------------------------------------------------------------------- Properties, disc attributes, Check
+// The pattern for a change made through a program's dialog: the dialog is the program's and only says what changes;
+// the kit checks the mounts are writable, makes the change inside Disc::transact (a failure puts everything back) and
+// refreshes.
+
+bool DiscWindow::applyProperties(const QVector<PropertyChange> &changes, QString *err) {
+    app::Document *d = document();
+    if (!d || !d->isOpen()) { *err = "no disc"; return false; }
+    for (const PropertyChange &c : changes)
+        if (!writable(c.item.mount)) { *err = "read-only: " + readOnlyReason(c.item.mount); return false; }
+    return d->disc().transact([&](QString *e) {
+        for (const PropertyChange &c : changes) {
+            fs::Volume *v = d->disc().volume(c.item.mount);
+            if (!v) { *e = "no such volume"; return false; }
+            if (!c.attrs.isEmpty() && !v->setAttrs(c.item.path, c.attrs, e)) return false;
+            if (c.moves() && !v->rename(c.item.path, c.to, e)) return false;
+        }
+        return true;
+    }, err);
+}
+
+void DiscWindow::editProperties() {
+    const QVector<Item> items = propertiesItems();
+    if (items.isEmpty()) return;
+    PropertiesEdit edit;
+    if (!propertiesEditor(items, &edit)) return;
+    if (edit.eachOnItsOwn) {
+        QStringList errors;
+        for (const PropertyChange &c : edit.changes) {
+            QString err;
+            if (!applyProperties({c}, &err)) errors << propertiesItemError(c, err);
+        }
+        refresh();
+        if (!errors.isEmpty()) message("Properties", errors.join("\n"));
+        return;
+    }
+    QString err;
+    if (!applyProperties(edit.changes, &err)) message("Properties", propertiesFailedText(err));
+    refresh();
+}
+
+bool DiscWindow::applyVolumeAttrs(int mount, const fs::AttrValues &values, QString *err) {
+    app::Document *d = document();
+    if (!d || !d->isOpen()) { *err = "no disc"; return false; }
+    if (!writable(mount)) { *err = "read-only: " + readOnlyReason(mount); return false; }
+    return d->disc().transact([&](QString *e) {
+        fs::Volume *v = d->disc().volume(mount);
+        if (!v) { *e = "no such volume"; return false; }
+        return v->setVolumeAttrs(values, e);
+    }, err);
+}
+
+void DiscWindow::editVolume(int mount, const QString &key) {
+    VolumeEdit edit;
+    if (!volumeEditor(mount, key, &edit)) return;
+    QString err;
+    if (!applyVolumeAttrs(mount, edit.values, &err)) message(edit.title, err);
+    refresh();
+}
+
+QString DiscWindow::checkText(const fs::Report &all, const QVector<fs::Report> &) const {
+    QString s;
+    if (all.ok() && all.warnings.isEmpty()) s += "No problems found.\n";
+    if (!all.errors.isEmpty()) s += "Errors:\n" + all.errors.join("\n") + "\n";
+    if (!all.warnings.isEmpty()) s += "Warnings:\n" + all.warnings.join("\n") + "\n";
+    if (!all.info.isEmpty()) s += all.info.join("\n") + "\n";
+    return s.trimmed();
+}
+
+void DiscWindow::showCheck(const fs::Report &all, const QVector<fs::Report> &perMount) {
+    message("Check disc", checkText(all, perMount), !all.ok());
+}
+
+void DiscWindow::checkDisc() {
+    const fs::Disc *disc = paneDisc();
+    if (!disc) return;
+    QVector<fs::Report> per;
+    const fs::Report all = disc->validateAll(&per);
+    showCheck(all, per);
+}
+
 // ------------------------------------------------------------------------------------------- Extract: the pattern for copying out
 
 bool DiscWindow::exportItems(const QVector<Item> &items, QVector<TransferItem> *out, QString *err) const {

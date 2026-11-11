@@ -21,7 +21,10 @@
 // opened, in one VolumePane per mount group (volumepane.h), and does what every Disk Wrangler window does the same
 // way: the pane rows, refresh, the selection as (mount, Path), the standard actions and their enabling, the title,
 // the status line, Save / Save As / Revert / Close with unsaved changes, Delete (a change made inside one
-// Disc::transact) and Extract (Volume::read and toRetroIn into TransferItems, written by the program's HostPolicy).
+// Disc::transact), Extract (Volume::read and toRetroIn into TransferItems, written by the program's HostPolicy), the
+// import session (importItems), and Properties, the disc's own attributes and Check (step 5f): the dialogs are the
+// program's (propertiesEditor, volumeEditor, checkText / showCheck), the change, its transaction and the refresh the
+// kit's.
 //
 // A program's main window derives from it and fills the hooks below. Everything that names a filesystem, a character
 // set, a format, DFS letters or side order stays in the program (it may test fsId(), the kit never does). Texts the
@@ -81,6 +84,26 @@ public:
         Item(int m, const fs::Path &p) : mount(m), path(p) {}
         bool operator==(const Item &o) const { return mount == o.mount && path == o.path; }
     };
+    // What a Properties dialog changes in one file (or folder): the attributes (only the keys given change; none: no
+    // setAttrs), then, if `to` is set and differs, a rename or move there (CP/M: another user area).
+    struct PropertyChange {
+        Item item;
+        fs::AttrValues attrs;
+        fs::Path to;                     // empty: it stays where it is
+        bool moves() const { return !to.parts.isEmpty() && !(to == item.path); }
+    };
+    struct PropertiesEdit {
+        QVector<PropertyChange> changes;
+        // false: every change in one transaction, all or nothing (CP/M; a failure says propertiesFailedText). true:
+        // each change in its own transaction, the ones that fail listed (propertiesItemError) and the rest kept.
+        bool eachOnItsOwn = false;
+    };
+    // What a disc-attribute dialog (title, label, boot option) gives: the values for Volume::setVolumeAttrs, and the
+    // title of the message if they are refused.
+    struct VolumeEdit {
+        fs::AttrValues values;
+        QString title;
+    };
 
     explicit DiscWindow(QWidget *parent = nullptr);
     ~DiscWindow() override;
@@ -122,6 +145,11 @@ public:
     // be read (err); otherwise the files that couldn't be written are in *errors, the rest are written, and *json gets
     // the retro-files items (makeJson turns them into the document). Returns the number of items in *files.
     bool extractTo(const QVector<Item> &items, const QString &dir, int *files, QStringList *errors, QJsonArray *json, QString *err);
+    // Properties without the dialog: the changes in one transaction (all or none). Every mount writable, else
+    // "read-only: <reason>".
+    bool applyProperties(const QVector<PropertyChange> &changes, QString *err);
+    // A disc attribute without the dialog: Volume::setVolumeAttrs in one transaction. Writable, else "read-only: ...".
+    bool applyVolumeAttrs(int mount, const fs::AttrValues &values, QString *err);
 
     // ----- importing (importsession.h): Add files, drops, Paste and drops from another window all end here
     // Imports items into dir of mount through an ImportSession with the program's importHooks(mount) (the conflict
@@ -145,6 +173,14 @@ public slots:
     virtual void revert();
     virtual void deleteSelected();
     virtual void extractSelected();
+    // Properties: propertiesItems() → the program's propertiesEditor (its dialog) → applyProperties → refresh().
+    virtual void editProperties();
+    // A disc attribute (key: "title", "label", "boot" ... as Volume::volumeAttrs names it) of a mount: the program's
+    // volumeEditor (its dialog) → applyVolumeAttrs; refused: message(title, err); then refresh().
+    virtual void editVolume(int mount, const QString &key);
+    // Check: Disc::validateAll, each mount's report beside it, shown by showCheck (default: checkText in a message
+    // titled "Check disc", a warning if there are errors).
+    virtual void checkDisc();
 
     // Not generic yet: the program overrides these (each does nothing in the kit).
     virtual void newWindow() {}
@@ -156,7 +192,6 @@ public slots:
     virtual void copySelected() {}
     virtual void paste() {}
     virtual void renameSelected() {}
-    virtual void editProperties() {}
     virtual void newDirectory() {}
     virtual void about() {}
 
@@ -226,6 +261,21 @@ protected:
     // How the items become host files (default: the core's plain policy).
     virtual std::shared_ptr<xfer::HostPolicy> hostPolicy(const QVector<TransferItem> &items) const;
     virtual QString extractedMessage(int files, const QString &dir) const;   // "Extracted N file(s) to <dir>"
+
+    // ----- hooks: Properties, disc attributes, Check (step 5f). The dialogs are the program's; it builds them on the
+    // Volume, Path and AttrValues (or its own classes), asks, and returns what changes. Nothing is written in them.
+    // The items Properties shows (default: selectedFiles(); a program whose Properties also edit folders gives the rows).
+    virtual QVector<Item> propertiesItems() const { return selectedFiles(); }
+    // The dialog: false = cancelled (nothing applied, no refresh); true = apply edit->changes (may be none).
+    virtual bool propertiesEditor(const QVector<Item> &, PropertiesEdit *) { return false; }
+    virtual QString propertiesFailedText(const QString &err) const { return "Nothing was changed: " + err; }
+    virtual QString propertiesItemError(const PropertyChange &c, const QString &err) const { return c.item.path.name() + ": " + err; }
+    // The dialog for one disc attribute: false = cancelled (nothing applied, no refresh).
+    virtual bool volumeEditor(int, const QString &, VolumeEdit *) { return false; }
+    // Check's text from the whole report (each line with its mount's label when there are several) and each mount's.
+    // Default: "No problems found.", or the errors and warnings under "Errors:" / "Warnings:".
+    virtual QString checkText(const fs::Report &all, const QVector<fs::Report> &perMount) const;
+    virtual void showCheck(const fs::Report &all, const QVector<fs::Report> &perMount);
 
     // ----- hooks: importing (importItems)
     // The session's hooks for an import into mount (ImportHooks). The kit fills conflict with askReplace if the
