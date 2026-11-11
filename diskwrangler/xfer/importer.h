@@ -29,6 +29,8 @@
 //   directory hook, and onError = Continue: an item that fails is recorded in ImportResult::errors (with its source)
 //   and the run goes on; import() then always returns true, and nothing that was done is undone. Cancel (from either
 //   callback) ends the run with what was done so far kept: ImportResult::cancelled, and import() returns true.
+//   The windows run it through dw::ui::ImportSession (ui/importsession.h), which also passes a guard per file
+//   (Disc::transact) and, where a window's rules aren't the volume's, its own placement and attributes (step 5e).
 
 #include <QJsonObject>
 #include <QPair>
@@ -51,6 +53,14 @@ struct ImportOptions {
     // DFS items arriving on ADFS: "dirs" or "flatten". The Importer doesn't read it; the caller sets the volume up
     // from it before the run (acorndw's Backend::configureTarget; the Acorn window's dfsLetterDirs setting).
     QString letters = "dirs";
+    // A name made twice in one run (two host files that become the same disc name): the second is called NAME~1 (the
+    // command line), or (false) it is a file that exists by then, so the conflict question or the options decide (the
+    // CP/M window, as it always did).
+    bool renameRepeats = true;
+    // A file exists only under exactly the same name (the CP/M window: a CP/M directory compares the bytes, so on a disc
+    // that allows lower case, readme.txt is not README.TXT). Otherwise the volume's own case rule
+    // (NameRules::caseSensitivity) decides, as the command line does.
+    bool exactNames = false;
 };
 
 struct Change {
@@ -68,6 +78,7 @@ struct ImportError {
     enum Kind { None, Failed, Conflict, Locked };
     Kind kind = None;
     QString message;                     // "<display path>: <why>", or a whole sentence
+    QString why;                         // the reason alone, as the volume gave it (the same as message for a sentence)
     QString path;                        // the display path on the volume concerned, or empty
     QString from;                        // the item's source (froms[i], with "/kid" for a folder's contents)
     bool failed() const { return kind != None; }
@@ -113,6 +124,17 @@ typedef std::function<DirChoice(const TransferItem &dir, const fs::Path &target)
 
 enum class OnError { Stop, Continue };
 
+// Where an item goes and under what name, for a caller whose rules differ from the volume's placeIncoming (a window
+// keeping its own: CP/M Disk Wrangler's target user, the Acorn window's DFS letters). target: the directory the item
+// is imported into (the run's, or where the directory hook put a folder's files).
+typedef std::function<fs::Placement(const TransferItem &item, const fs::Path &target)> PlaceHook;
+// The attributes a file is written with. replacing: the file it replaces (unlocked first, if it was locked), or null.
+// Default: Volume::fromRetro, and a plain item replacing a file keeps that file's attributes (locked apart).
+typedef std::function<fs::AttrValues(const TransferItem &item, const fs::Entry *replacing)> AttrsHook;
+// Runs one file's changes (unlocking the file it replaces, then writing it) so that a failure leaves nothing of that
+// file behind: a window passes Disc::transact. Without one the changes are made as they come.
+typedef std::function<bool(const std::function<bool(QString *)> &change, QString *err)> ItemGuard;
+
 class Importer {
 public:
     typedef fs::NodeKind NodeKind;
@@ -121,6 +143,9 @@ public:
     void setConflictCallback(const ConflictCallback &f) { m_conflict = f; }
     void setDirHook(const DirHook &f) { m_dirHook = f; }
     void setOnError(OnError e) { m_onError = e; }
+    void setPlaceHook(const PlaceHook &f) { m_place = f; }
+    void setAttrsHook(const AttrsHook &f) { m_attrs = f; }
+    void setItemGuard(const ItemGuard &f) { m_guard = f; }
 
     // Imports the items into directory dir (made if it doesn't exist). froms[i] is item i's source, for the log.
     // false (onError = Stop only): err says why, and the run is to be abandoned. true: the run finished, or was
@@ -132,7 +157,8 @@ private:
     // Each returns false when the run must stop (a failure under Stop, or Cancel); true to go on.
     bool importOne(const TransferItem &it, const QString &from, const fs::Path &dir, const QString &prefix, ImportResult *r);
     bool ensureDir(const fs::Path &dir, ImportResult *r, ImportError *e);
-    bool fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from);
+    bool fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from,
+              const QString &why = QString());
     bool exists(const fs::Path &p, fs::Entry *e) const;
     QString madeKey(const fs::Path &dir, const QString &name) const;
     QString uniqueName(const fs::Path &dir, const QString &name, NodeKind kind) const;
@@ -142,6 +168,9 @@ private:
     ImportOptions m_o;
     ConflictCallback m_conflict;
     DirHook m_dirHook;
+    PlaceHook m_place;
+    AttrsHook m_attrs;
+    ItemGuard m_guard;
     OnError m_onError = OnError::Stop;
     int m_all = 0;                       // 0 = ask, 1 = replace all, 2 = skip all (a conflict callback's answer)
     bool m_abandon = false;              // stopped by a failure under Stop

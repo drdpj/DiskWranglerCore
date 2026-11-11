@@ -60,9 +60,11 @@ static ImportError makeError(ImportError::Kind kind, const QString &msg, const Q
 }
 
 // Under Continue the item's error is recorded and the run goes on (true); under Stop it is the run's error (false).
-bool Importer::fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from) {
+bool Importer::fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from,
+                    const QString &why) {
     ImportError e = makeError(kind, msg, path);
     e.from = from;
+    e.why = why.isEmpty() ? msg : why;
     if (m_onError == OnError::Continue) {
         r->errors << e;
         return true;
@@ -75,7 +77,12 @@ bool Importer::fail(ImportResult *r, ImportError::Kind kind, const QString &msg,
 bool Importer::exists(const fs::Path &p, fs::Entry *e) const {
     QString err;
     fs::Entry x;
-    return m_v->stat(p, e ? e : &x, &err);
+    if (!m_o.exactNames || p.isRoot()) return m_v->stat(p, e ? e : &x, &err);
+    QVector<fs::Entry> l;
+    if (!m_v->list(p.parent(), &l, &err)) return false;
+    for (const fs::Entry &f : l)
+        if (f.name == p.name()) { if (e) *e = f; return true; }
+    return false;
 }
 
 QString Importer::madeKey(const fs::Path &dir, const QString &name) const {
@@ -185,7 +192,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
         itp = &named;
     }
     const TransferItem &it = *itp;
-    fs::Placement p = m_v->placeIncoming(it, dir);
+    fs::Placement p = m_place ? m_place(it, dir) : m_v->placeIncoming(it, dir);
     if (!p.warning.isEmpty()) r->warnings << (p.warning.startsWith(from + ": ") ? p.warning : QString("%1: %2").arg(from, p.warning));   // a name's own warning may already say which
     {
         ImportError e;
@@ -193,7 +200,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
     }
     QString name = p.name;
     const NodeKind kind = isDir ? NodeKind::Dir : NodeKind::File;
-    if (m_made.contains(madeKey(p.dir, name))) {
+    if (m_o.renameRepeats && m_made.contains(madeKey(p.dir, name))) {
         const QString u = uniqueName(p.dir, name, kind);
         r->renamed.append({name, u});
         r->warnings << QString("%1: the name %2 was already made in this run: called %3 instead").arg(from, name, u);
@@ -242,26 +249,39 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
             return true;
         }
         const QVector<fs::AttrSpec> specs = m_v->fileAttrs();
-        for (const fs::AttrSpec &s : specs) {
-            if (s.type != fs::AttrSpec::Bool || (s.key != "locked" && s.key != "readonly") || !ex.attrs.value(s.key).toBool()) continue;
-            if (!unlock) return fail(r, ImportError::Locked, QString("%1 is %2: use --force to replace it").arg(shown, s.key == "locked" ? "locked" : "read-only"), shown, from);
-            QString why;
-            if (!m_v->setAttrs(target, {{s.key, false}}, &why)) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from);
-        }
+        for (const fs::AttrSpec &s : specs)
+            if (s.type == fs::AttrSpec::Bool && (s.key == "locked" || s.key == "readonly") && ex.attrs.value(s.key).toBool() && !unlock)
+                return fail(r, ImportError::Locked, QString("%1 is %2: use --force to replace it").arg(shown, s.key == "locked" ? "locked" : "read-only"), shown, from);
         replace = true;
     }
-    fs::AttrValues attrs = m_v->fromRetro(it.attrs, NodeKind::File);
-    // a plain file over a file keeps the old file's attributes. Plain: the item carries no attributes, or none this
-    // volume takes (a DFS volume's fromRetro always gives "locked", so the first test is what catches a host file there)
-    if ((it.attrs.isEmpty() || attrs.isEmpty()) && replace) {
-        attrs = ex.attrs;
-        for (const fs::AttrSpec &s : m_v->fileAttrs())
-            if (s.key == "locked" || s.key == "readonly") attrs.remove(s.key);     // (cleared above when forced)
-    }
-    const QDateTime when = it.when.isValid() ? it.when : dw::now();
+    // the file's changes: unlock what it replaces, then write it (through the caller's guard, if any, so that a failure
+    // leaves nothing of it)
     QString why;
-    if (!m_v->write(p.dir, name, it.data, attrs, when, replace, &why))
-        return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from);
+    const std::function<bool(QString *)> change = [&](QString *e) {
+        if (replace) {
+            for (const fs::AttrSpec &s : m_v->fileAttrs()) {
+                if (s.type != fs::AttrSpec::Bool || (s.key != "locked" && s.key != "readonly") || !ex.attrs.value(s.key).toBool()) continue;
+                if (!m_v->setAttrs(target, {{s.key, false}}, e)) return false;
+            }
+        }
+        fs::AttrValues attrs;
+        if (m_attrs) attrs = m_attrs(it, replace ? &ex : nullptr);
+        else {
+            attrs = m_v->fromRetro(it.attrs, NodeKind::File);
+            // a plain file over a file keeps the old file's attributes. Plain: the item carries no attributes, or none
+            // this volume takes (a DFS volume's fromRetro always gives "locked", so the first test is what catches a
+            // host file there)
+            if ((it.attrs.isEmpty() || attrs.isEmpty()) && replace) {
+                attrs = ex.attrs;
+                for (const fs::AttrSpec &s : m_v->fileAttrs())
+                    if (s.key == "locked" || s.key == "readonly") attrs.remove(s.key);     // (cleared above when forced)
+            }
+        }
+        const QDateTime when = it.when.isValid() ? it.when : dw::now();
+        return m_v->write(p.dir, name, it.data, attrs, when, replace, e);
+    };
+    const bool done = m_guard ? m_guard(change, &why) : change(&why);
+    if (!done) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why);
     m_made.insert(madeKey(p.dir, name));
     if (replace) ++r->replaced; else ++r->added;
     Change c; c.op = replace ? "replace" : "add"; c.vol = m_label; c.path = shown; c.from = from; c.note = p.warning;
