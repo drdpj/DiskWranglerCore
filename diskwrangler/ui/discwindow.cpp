@@ -26,10 +26,13 @@
 #include <QJsonArray>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QStatusBar>
 #include <QTabWidget>
 
 #include <diskwrangler/app/appsettings.h>
+#include <diskwrangler/app/handoff.h>
+#include <diskwrangler/ui/handoffdialog.h>
 
 namespace dw {
 namespace ui {
@@ -526,6 +529,68 @@ void DiscWindow::importSummary(const xfer::ImportResult &r) {
     QStringList errors;
     for (const xfer::ImportError &e : r.errors) errors << e.message;
     if (!errors.isEmpty()) message("Add files", s + ".\n\n" + errors.join("\n"));
+}
+
+// ------------------------------------------------------------------------------------------- opening (step 5g)
+
+bool DiscWindow::openFile(const QString &path, int force) {
+    if (!beforeOpen(path)) return false;
+    fs::Verdict verdict;
+    if (!detectImage(path, force, &verdict)) return false;
+    const fs::Candidate *pick = verdict.bestCandidate();
+    if (verdict.action == fs::Verdict::Ask) {          // two kinds of disc equally likely: the user says which
+        const int a = autoAnswer ? 0 : askWhich(this, path, *verdict.bestCandidate(), *verdict.rivalCandidate());
+        if (a < 0) { openStopped(); return false; }
+        if (a == 1) pick = verdict.rivalCandidate();
+    }
+    if (pick && pick->foreign()) {                     // another program's disc: started there, or the program's words
+        openStopped();
+        if (autoAnswer) return false;
+        const NotOpened m = handOverMessage(path, verdict, *pick);
+        QString why;
+        if (!app::handedBack(path) && app::startOtherApp(pick->owner, path, &why)) showStarted(this, *pick, path, m.startedTitle);
+        else showNotOpened(path, m, pick);
+        return false;
+    }
+    if (!openDocument(path, verdict, pick, force)) return false;
+    afterOpen(path);
+    return true;
+}
+
+DiscWindow *DiscWindow::openInWindow(const QString &path) {
+    const app::Document *d = document();
+    DiscWindow *w = d && d->isOpen() ? createWindow() : nullptr;
+    if (!w) return openFile(path) ? this : nullptr;
+    if (w->openFile(path)) return w;
+    if (closeFailedWindow()) w->close();
+    return nullptr;
+}
+
+DiscWindow::NotOpened DiscWindow::handOverMessage(const QString &path, const fs::Verdict &, const fs::Candidate &pick) const {
+    NotOpened m;
+    m.title = "Open";
+    m.text = QFileInfo(path).fileName() + ": " + pick.description;
+    return m;
+}
+
+QString DiscWindow::locateProgram(const fs::OtherApp &app) { return chooseOtherApp(this, app); }
+
+bool DiscWindow::showNotOpened(const QString &path, const NotOpened &m, const fs::Candidate *owner) {
+    if (autoAnswer) return false;
+    QMessageBox box(m.warning ? QMessageBox::Warning : QMessageBox::Information, m.title, m.text, QMessageBox::Ok, this);
+    box.setTextFormat(m.format);
+    QPushButton *locate = nullptr;
+    if (owner && owner->foreign()) box.setInformativeText(releasesLink(owner->owner));
+    if (m.selectable) box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    QVector<QPushButton *> own;
+    for (const NotOpened::Button &b : m.buttons) own << box.addButton(b.text, QMessageBox::ActionRole);
+    if (owner && owner->foreign()) locate = addLocateButton(&box, owner->owner);
+    box.exec();
+    for (int i = 0; i < own.size(); ++i)
+        if (box.clickedButton() == own[i] && m.buttons[i].run) m.buttons[i].run();
+    if (!owner) return false;
+    return locateAndStart(this, &box, locate, *owner, path,
+                          [this](QWidget *, const fs::OtherApp &a) { return locateProgram(a); }, m.startedTitle);
 }
 
 } // namespace ui

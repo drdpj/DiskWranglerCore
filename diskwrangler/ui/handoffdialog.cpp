@@ -18,6 +18,9 @@
 #include "handoffdialog.h"
 
 #include <QCheckBox>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QPushButton>
@@ -35,22 +38,26 @@ static QString discWord(const fs::Candidate &c) {
     return QString(QString("AEIOU").contains(f) ? "an " : "a ") + n + " disc";
 }
 
+void showStarted(QWidget *parent, const fs::Candidate &c, const QString &imagePath, const QString &title) {
+    const QString key = "handoff/quiet/" + c.owner.id;
+    if (AppSettings().value(key, false).toBool()) return;
+    QMessageBox box(QMessageBox::Information, title.isEmpty() ? "Opened in " + c.owner.name : title,
+                    QString("This is %1, so it has been opened in %2.").arg(discWord(c), c.owner.name),
+                    QMessageBox::Ok, parent);
+    box.setInformativeText(QFileInfo(imagePath).fileName() + ": " + c.description);
+    auto *quiet = new QCheckBox("Don't show this again");
+    box.setCheckBox(quiet);
+    box.exec();
+    if (quiet->isChecked()) AppSettings().setValue(key, true);
+}
+
 bool handOff(QWidget *parent, const fs::Candidate &c, const QString &imagePath, const QString &title, const QString &text,
              bool interactive, bool allowStart) {
     QString why;
     const bool started = allowStart && !app::handedBack(imagePath) && app::startOtherApp(c.owner, imagePath, &why);
     if (!interactive) return started;
     if (started) {
-        const QString key = "handoff/quiet/" + c.owner.id;
-        if (AppSettings().value(key, false).toBool()) return true;
-        QMessageBox box(QMessageBox::Information, title.isEmpty() ? "Opened in " + c.owner.name : title,
-                        QString("This is %1, so it has been opened in %2.").arg(discWord(c), c.owner.name),
-                        QMessageBox::Ok, parent);
-        box.setInformativeText(QFileInfo(imagePath).fileName() + ": " + c.description);
-        auto *quiet = new QCheckBox("Don't show this again");
-        box.setCheckBox(quiet);
-        box.exec();
-        if (quiet->isChecked()) AppSettings().setValue(key, true);
+        showStarted(parent, c, imagePath, title);
         return true;
     }
     if (title.isEmpty()) return false;
@@ -58,8 +65,49 @@ bool handOff(QWidget *parent, const fs::Candidate &c, const QString &imagePath, 
     box.setTextFormat(Qt::PlainText);
     box.setInformativeText(releasesLink(c.owner));
     box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    QPushButton *locate = addLocateButton(&box, c.owner);
     box.exec();
-    return false;
+    return locateAndStart(parent, &box, locate, c, imagePath, LocateChooser(), title);
+}
+
+QString chooseOtherApp(QWidget *parent, const fs::OtherApp &app) {
+#if defined(Q_OS_WIN)
+    const QString filter = "Programs (*.exe);;All files (*)";
+    const QString from = qEnvironmentVariable("ProgramFiles");
+#elif defined(Q_OS_MACOS)
+    const QString filter = "Applications (*.app);;All files (*)";
+    const QString from = "/Applications";
+#else
+    const QString filter = "All files (*)";
+    const QString from = QCoreApplication::applicationDirPath();
+#endif
+    return QFileDialog::getOpenFileName(parent, "Locate " + app.name, from, filter);
+}
+
+QPushButton *addLocateButton(QMessageBox *box, const fs::OtherApp &app) {
+    if (app.isNull() || !app::findOtherApp(app).isEmpty()) return nullptr;
+    QPushButton *b = box->addButton("&Locate...", QMessageBox::ActionRole);
+    b->setToolTip("Show where " + app.name + " is on this computer; it is remembered");
+    return b;
+}
+
+bool locateAndStart(QWidget *parent, QMessageBox *box, QPushButton *locate, const fs::Candidate &c, const QString &imagePath,
+                    const LocateChooser &choose, const QString &startedTitle) {
+    if (!locate || box->clickedButton() != locate) return false;
+    const QString file = choose ? choose(parent, c.owner) : chooseOtherApp(parent, c.owner);
+    if (file.isEmpty()) return false;
+    QString why;
+    if (!app::setOtherAppPath(c.owner, file, &why)) {
+        QMessageBox::warning(parent, "Locate " + c.owner.name,
+                             QString("%1 is not %2: %3.").arg(QDir::toNativeSeparators(file), c.owner.name, why));
+        return false;
+    }
+    if (!app::startOtherApp(c.owner, imagePath, &why)) {
+        QMessageBox::warning(parent, "Locate " + c.owner.name, why + ".");
+        return false;
+    }
+    showStarted(parent, c, imagePath, startedTitle);
+    return true;
 }
 
 QString releasesLink(const fs::OtherApp &app) {

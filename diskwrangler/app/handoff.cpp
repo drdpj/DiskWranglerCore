@@ -23,6 +23,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -132,6 +133,47 @@ bool handedBack(const QString &imagePath) {
     if (h.isEmpty()) return false;
     const QFileInfo a(h), b(imagePath);
     return a.canonicalFilePath() == b.canonicalFilePath() || a.absoluteFilePath() == b.absoluteFilePath();
+}
+
+// The .app bundle a file is (or is inside, as <bundle>/Contents/MacOS/<program>); else file itself
+static QString bundleOf(const QString &file) {
+#ifdef Q_OS_MACOS
+    const QFileInfo fi(file);
+    const QDir macos = fi.absoluteDir();
+    if (fi.isFile() && macos.dirName() == "MacOS") {
+        QDir b = macos;
+        if (b.cdUp() && b.dirName() == "Contents" && b.cdUp() && b.dirName().endsWith(".app")) return b.absolutePath();
+    }
+#endif
+    return file;
+}
+
+bool isOtherApp(const QString &file, const fs::OtherApp &app, QString *why) {
+    const QString f = bundleOf(file);
+    const QFileInfo fi(f);
+    if (app.isNull()) { *why = "no program to look for"; return false; }
+    if (!fi.exists()) { *why = "there is no such file"; return false; }
+    // the names inFolder() looks for, in any case
+    const QString id = QRegularExpression::escape(app.id);
+    const QRegularExpression names("^" + id + "(\\.exe|\\.app|-.*\\.appimage)?$", QRegularExpression::CaseInsensitiveOption);
+    if (!names.match(fi.fileName()).hasMatch()) {
+#if defined(Q_OS_WIN)
+        *why = "its program file is called " + app.id + ".exe";
+#elif defined(Q_OS_MACOS)
+        *why = "it is called " + app.id + ".app";
+#else
+        *why = QString("its program file is called %1 (or %1-<version>.AppImage)").arg(app.id);
+#endif
+        return false;
+    }
+    if (!runnable(f)) { *why = "it is not a program that can be run"; return false; }
+    return true;
+}
+
+bool setOtherAppPath(const fs::OtherApp &app, const QString &file, QString *why) {
+    if (!isOtherApp(file, app, why)) return false;
+    AppSettings().setValue("otherApps/" + app.id, QFileInfo(bundleOf(file)).absoluteFilePath());
+    return true;
 }
 
 } // namespace app
