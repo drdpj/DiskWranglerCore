@@ -400,5 +400,52 @@ bool DiscWindow::extractTo(const QVector<Item> &items, const QString &dir, int *
     return true;
 }
 
+// ------------------------------------------------------------------------------------------- importing: the import session
+
+ImportHooks DiscWindow::importHooks(int) { return ImportHooks(); }
+
+xfer::Conflict DiscWindow::askReplace(int mount, const fs::Path &target, const fs::Entry &, const TransferItem &) {
+    const fs::Disc *disc = paneDisc();
+    const fs::Volume *v = disc ? disc->volume(mount) : nullptr;
+    const QString shown = v ? v->displayPath(target) : target.toString();
+    const auto b = QMessageBox::question(this, "File exists", shown + " already exists. Replace it?",
+                                         QMessageBox::Yes | QMessageBox::YesToAll | QMessageBox::No | QMessageBox::NoToAll | QMessageBox::Cancel);
+    switch (b) {
+    case QMessageBox::Yes: return xfer::Conflict::Replace;
+    case QMessageBox::YesToAll: return xfer::Conflict::ReplaceAll;
+    case QMessageBox::No: return xfer::Conflict::Skip;
+    case QMessageBox::NoToAll: return xfer::Conflict::SkipAll;
+    default: return xfer::Conflict::Cancel;
+    }
+}
+
+xfer::ImportResult DiscWindow::importItems(int mount, const fs::Path &dir, const QVector<TransferItem> &items,
+                                           const QStringList &froms, const QVector<xfer::ImportError> &readErrors) {
+    app::Document *d = document();
+    ImportHooks h = importHooks(mount);
+    if (!h.conflict)
+        h.conflict = [this, mount](const fs::Path &t, const fs::Entry &e, const TransferItem &i) { return askReplace(mount, t, e, i); };
+    const xfer::ConflictCallback ask = h.conflict;
+    h.conflict = [ask](const fs::Path &t, const fs::Entry &e, const TransferItem &i) {
+        return autoAnswer ? xfer::Conflict::Replace : ask(t, e, i);    // tests: the first, "go ahead" answer
+    };
+    ImportSession s(d && d->isOpen() ? &d->disc() : nullptr, mount, h);
+    const xfer::ImportResult r = s.run(items, froms, dir, readOnlyReason(mount), readErrors);
+    refresh();
+    importSummary(r);
+    return r;
+}
+
+void DiscWindow::importSummary(const xfer::ImportResult &r) {
+    const int files = r.added + r.replaced;
+    QString s = QString("Added %1 file%2").arg(files).arg(files == 1 ? "" : "s");
+    if (r.replaced) s += QString(" (%1 replaced)").arg(r.replaced);
+    if (r.skipped) s += QString(", skipped %1").arg(r.skipped);
+    showMessage(s + ".");
+    QStringList errors;
+    for (const xfer::ImportError &e : r.errors) errors << e.message;
+    if (!errors.isEmpty()) message("Add files", s + ".\n\n" + errors.join("\n"));
+}
+
 } // namespace ui
 } // namespace dw

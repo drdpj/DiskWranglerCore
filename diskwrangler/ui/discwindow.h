@@ -47,6 +47,7 @@
 #include <diskwrangler/app/appinfo.h>
 #include <diskwrangler/app/document.h>
 #include <diskwrangler/fs/volume.h>
+#include <diskwrangler/ui/importsession.h>
 #include <diskwrangler/ui/volumepane.h>
 #include <diskwrangler/xfer/retrofiles.h>
 #include <diskwrangler/xfer/transferitem.h>
@@ -121,6 +122,13 @@ public:
     // be read (err); otherwise the files that couldn't be written are in *errors, the rest are written, and *json gets
     // the retro-files items (makeJson turns them into the document). Returns the number of items in *files.
     bool extractTo(const QVector<Item> &items, const QString &dir, int *files, QStringList *errors, QJsonArray *json, QString *err);
+
+    // ----- importing (importsession.h): Add files, drops, Paste and drops from another window all end here
+    // Imports items into dir of mount through an ImportSession with the program's importHooks(mount) (the conflict
+    // question is askReplace, answered Replace under autoAnswer), then refresh() and importSummary(). readErrors: what
+    // the program couldn't read (host files), first in the result's errors. Returns the result.
+    xfer::ImportResult importItems(int mount, const fs::Path &dir, const QVector<TransferItem> &items,
+                                   const QStringList &froms = {}, const QVector<xfer::ImportError> &readErrors = {});
 
     // The disc of the current document, or null (PaneHost).
     const fs::Disc *paneDisc() const override;
@@ -218,6 +226,17 @@ protected:
     // How the items become host files (default: the core's plain policy).
     virtual std::shared_ptr<xfer::HostPolicy> hostPolicy(const QVector<TransferItem> &items) const;
     virtual QString extractedMessage(int files, const QString &dir) const;   // "Extracted N file(s) to <dir>"
+
+    // ----- hooks: importing (importItems)
+    // The session's hooks for an import into mount (ImportHooks). The kit fills conflict with askReplace if the
+    // program leaves it empty. Default: nothing but that.
+    virtual ImportHooks importHooks(int mount);
+    // A file exists: Replace, Skip, the "all" answers or Cancel. Default: "<path> already exists. Replace it?" with
+    // Yes, Yes to all, No, No to all and Cancel, titled "File exists".
+    virtual xfer::Conflict askReplace(int mount, const fs::Path &target, const fs::Entry &existing, const TransferItem &incoming);
+    // After an import (refresh() done): what happened, in the program's words. Default: "Added N file(s) (M replaced),
+    // skipped K." in the status line, and the errors in a box titled "Add files".
+    virtual void importSummary(const xfer::ImportResult &r);
 
     // The file name of the document, for messages ("untitled" if none).
     QString documentName() const;
