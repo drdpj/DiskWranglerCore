@@ -63,8 +63,9 @@ public:
     // Runs f; if it fails (returns false), the staged writes are put back as they were and every volume reloads,
     // so the disc is exactly as before. err: f's error, or the reload's if that failed too.
     bool transact(const std::function<bool(QString *)> &f, QString *err);
-    // Every mount's check(), with the mount's label in front of each line. Errors veto a commit.
-    Report validateAll() const;
+    // Every mount's check(), with the mount's label in front of each line. Errors veto a commit. perMount (if given)
+    // gets each mount's own report, in mount order, as check() gave it (an empty one for a mount with no volume).
+    Report validateAll(QVector<Report> *perMount = nullptr) const;
     // Saves: validateAll() (as SaveOptions::validate, before anything else), then the container's checked save.
     // o.validate and o.verify are kept and run as well. Every volume reloads afterwards.
     bool commit(device::Container::SaveOptions o, QString *err);

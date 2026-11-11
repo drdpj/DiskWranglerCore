@@ -44,11 +44,13 @@ bool Disc::transact(const std::function<bool(QString *)> &f, QString *err) {
     return false;
 }
 
-Report Disc::validateAll() const {
+Report Disc::validateAll(QVector<Report> *perMount) const {
     Report r;
+    if (perMount) perMount->clear();
     for (const Mount &m : m_mounts) {
-        if (!m.vol) continue;
+        if (!m.vol) { if (perMount) perMount->append(Report()); continue; }
         const Report v = m.vol->check();
+        if (perMount) perMount->append(v);
         const QString p = m_mounts.size() > 1 ? m.label + ": " : QString();
         for (const QString &s : v.errors) r.errors << p + s;
         for (const QString &s : v.warnings) r.warnings << p + s;
