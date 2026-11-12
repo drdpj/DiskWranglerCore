@@ -11,8 +11,10 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QTimer>
 #include <QTreeWidget>
+#include <algorithm>
 #include <cstdio>
 #include <diskwrangler/text/textviews.h>
 #include <diskwrangler/text/viewers.h>
@@ -75,8 +77,10 @@ static QCheckBox *box(QWidget *w, const QString &label) {
 // A window of the kit over a MemDocument: what a program's main window fills in, at its plainest.
 class KitWindow : public dw::ui::DiscWindow {
 public:
-    explicit KitWindow(memvol::MemDocument *d, dw::ui::PaneLayout l = {}) : m_doc(d), m_layout(l) {
+    // setUp false: the derived window calls setupKit() itself (its own hooks are only there once it is made).
+    explicit KitWindow(memvol::MemDocument *d, dw::ui::PaneLayout l = {}, bool setUp = true) : m_doc(d), m_layout(l) {
         if (m_layout.columns.isEmpty()) m_layout.columns = {{"Name", "", false}, {"Size", "100000", true}};
+        if (!setUp) return;
         setupKit();
         refresh();
     }
@@ -104,6 +108,41 @@ protected:
 private:
     memvol::MemDocument *m_doc;
     dw::ui::PaneLayout m_layout;
+};
+
+// A window with three pane groups as tabs that the test shows and hides, rows ordered and cut short as a program asks,
+// and Delete of the selected rows (folders included), each on its own (step 5i: Acorn Disk Wrangler's window).
+class TabWindow : public KitWindow {
+public:
+    explicit TabWindow(memvol::MemDocument *d) : KitWindow(d, {}, false) {}
+    QSet<QString> hidden;                                     // groups whose tab isn't wanted
+    QMap<QString, QString> titles;
+    QMap<QString, dw::ui::PaneLayout> layouts;
+    bool reverse = false;                                     // orderRows: the "two" group's rows backwards
+    QString noChildren;                                       // listChildren: a directory left empty
+    bool deleteAnswer = true;
+    int deleteAsked = 0;
+    void build() { setupKit(); refresh(); }
+protected:
+    QStringList paneGroups() const override { return {"one", "two", "three"}; }
+    QString paneTitle(const QString &g) const override { return titles.value(g, g); }
+    bool paneShown(const QString &g) const override { return !hidden.contains(g); }
+    dw::ui::PaneLayout paneLayout(const QString &g) const override {
+        dw::ui::PaneLayout l = layouts.value(g);
+        if (l.columns.isEmpty()) l.columns = {{"Name", "", false}};
+        return l;
+    }
+    void orderRows(int mount, const dw::fs::Path &, QVector<dw::fs::Entry> *e) const override {
+        if (reverse && document()->disc().mounts()[mount].group == "two") std::reverse(e->begin(), e->end());
+    }
+    bool listChildren(int, const dw::fs::Path &dir, int) const override { return dir.name() != noChildren; }
+    QVector<Item> deleteItems() const override {
+        QVector<Item> v;
+        for (const dw::ui::PaneRow &r : selectedRows()) if (!r.root) v << Item(r.mount, r.path);
+        return v;
+    }
+    bool confirmDelete(const QVector<Item> &) override { ++deleteAsked; return deleteAnswer; }
+    bool deleteEachOnItsOwn() const override { return true; }
 };
 
 // A window whose import questions are answered from a script, and which records its summaries (step 5e).
@@ -561,6 +600,94 @@ static void kitTests() {
         w.refresh();
         CHECK(!p->findRow(1, Path({"d"}))->isSelected() && p->findRow(0, Path({"zero.txt"}))->isSelected(),
               "reselectFolders off: a refresh keeps the files selected, not the folders");
+    }
+
+    printf("== window kit: tabs that come and go, rows as the program wants them, Delete one by one (step 5i)\n");
+    {
+        memvol::MemDocument doc(3, "/tmp/tabs.img");
+        doc.disc().mounts()[0].group = "one";
+        doc.disc().mounts()[1].group = "two";
+        doc.disc().mounts()[2].group = "three";
+        doc.vol(0)->write(Path(), "a.txt", "a", {}, QDateTime(), false, &err);
+        doc.vol(0)->mkdir(Path(), "d", &err);
+        doc.vol(0)->write(Path({"d"}), "in.txt", "in", {}, QDateTime(), false, &err);
+        for (const char *n : {"x", "y", "z"}) doc.vol(1)->write(Path(), n, n, {}, QDateTime(), false, &err);
+        doc.vol(1)->write(Path(), "w", "w", {{"locked", true}}, QDateTime(), false, &err);
+        doc.vol(2)->mkdir(Path(), "deep", &err);
+        doc.vol(2)->write(Path({"deep"}), "hidden.txt", "h", {}, QDateTime(), false, &err);
+        TabWindow w(&doc);
+        w.hidden = {"two"};
+        dw::ui::PaneLayout once;                                // rebuilt from nothing at every refresh
+        once.expand = dw::ui::PaneLayout::ExpandRoots;
+        once.keepSelection = false;
+        once.rootsAlwaysOpen = true;
+        w.layouts["one"] = once;
+        dw::ui::PaneLayout keep;
+        keep.keepCurrent = true;
+        w.layouts["two"] = keep;
+        w.titles["two"] = "Two (read-only)";
+        w.noChildren = "deep";
+        w.build();
+        QTabWidget *t = w.tabWidget();
+        auto tabTexts = [t] { QStringList l; for (int i = 0; t && i < t->count(); ++i) l << t->tabText(i); return l; };
+        CHECK(t && w.centralWidget() == t && tabTexts() == QStringList({"one", "three"}), qPrintable("a group not wanted has no tab: " + tabTexts().join("|")));
+        CHECK(w.pane("two") && t->indexOf(w.pane("two")) < 0 && w.pane("two")->topLevelItemCount() == 1, "its pane is still there, with its rows");
+        w.hidden.clear();
+        w.refresh();
+        CHECK(tabTexts() == QStringList({"one", "Two (read-only)", "three"}) && t->widget(1) == w.pane("two"),
+              qPrintable("wanted again: back in its place, with the program's text: " + tabTexts().join("|")));
+        w.titles["two"] = "Two";
+        w.hidden = {"one"};
+        t->setCurrentWidget(w.pane("one"));
+        w.refresh();
+        CHECK(tabTexts() == QStringList({"Two", "three"}) && w.currentPane() != w.pane("one"), "the text follows the program; a tab goes");
+        w.hidden.clear();
+        w.refresh();
+        CHECK(tabTexts() == QStringList({"one", "Two", "three"}), "and comes back first");
+
+        dw::ui::VolumePane *one = w.pane("one");
+        CHECK(one->topLevelItem(0)->isExpanded() && !one->findRow(0, Path({"d"}))->isExpanded(), "ExpandRoots");
+        one->findRow(0, Path({"a.txt"}))->setSelected(true);
+        one->setCurrentItem(one->findRow(0, Path({"a.txt"})));
+        one->topLevelItem(0)->setExpanded(false);
+        w.refresh();
+        CHECK(one->selectedItems().isEmpty() && !one->currentItem() && one->topLevelItem(0)->isExpanded(),
+              "keepSelection off: nothing selected or current after a refresh; rootsAlwaysOpen: the root opens again");
+
+        dw::ui::VolumePane *two = w.pane("two");
+        CHECK(rowTexts(two) == QStringList({"part 1", "  w", "  x", "  y", "  z"}), qPrintable("the volume's order: " + rowTexts(two).join("|")));
+        w.reverse = true;
+        two->setCurrentItem(two->findRow(1, Path({"y"})));
+        two->findRow(1, Path({"x"}))->setSelected(true);
+        w.refresh();
+        CHECK(rowTexts(two) == QStringList({"part 1", "  z", "  y", "  x", "  w"}), qPrintable("orderRows: " + rowTexts(two).join("|")));
+        CHECK(two->currentItem() == two->findRow(1, Path({"y"})) && two->findRow(1, Path({"x"}))->isSelected(),
+              "keepCurrent: the current row is current again, the selection kept");
+        dw::ui::VolumePane *three = w.pane("three");
+        CHECK(three->findRow(2, Path({"deep"})) && three->findRow(2, Path({"deep"}))->childCount() == 0, "listChildren false: the directory has no rows under it");
+
+        QVector<dw::TransferItem> out;
+        CHECK(w.exportItems({Item(0, Path({"d"}))}, &out, &err) && out.size() == 1 && out[0].isDir && out[0].name == "d" &&
+                  out[0].kids.size() == 1 && out[0].kids[0].name == "in.txt" && out[0].kids[0].data == "in",
+              "exportItems: a folder is an item with what is in it");
+
+        t->setCurrentWidget(two);
+        two->clearSelection();
+        for (const char *n : {"w", "x", "z"}) two->findRow(1, Path({n}))->setSelected(true);
+        w.deleteAnswer = false;
+        w.deleteSelected();
+        CHECK(w.deleteAsked == 1 && two->findRow(1, Path({"x"})), "confirmDelete says no: nothing deleted");
+        w.deleteAnswer = true;
+        w.shown.clear();
+        w.deleteSelected();
+        CHECK(!two->findRow(1, Path({"x"})) && !two->findRow(1, Path({"z"})) && two->findRow(1, Path({"w"})) && two->findRow(1, Path({"y"})),
+              "deleteEachOnItsOwn: the files that can go go, the locked one stays");
+        CHECK(w.shown.size() == 1 && w.shown[0] == "Delete: w: w is locked", qPrintable("the failure listed after: " + w.shown.join("|")));
+        t->setCurrentWidget(one);
+        one->findRow(0, Path({"d"}))->setSelected(true);
+        w.deleteSelected();
+        dw::fs::Entry e;
+        CHECK(!doc.vol(0)->stat(Path({"d"}), &e, &err) && !doc.vol(0)->stat(Path({"d", "in.txt"}), &e, &err), "a folder deleted with what is in it");
     }
 
     printf("== import session: the conflict question, Continue, Cancel, hooks (step 5e)\n");
