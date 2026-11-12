@@ -1,8 +1,8 @@
 // Part of DiskWranglerCore - Copyright (C) 2026 Daniel Jameson - GPL v3 or later
 // volumetest: the filesystem layer on its own (diskwrangler/fs). Path; a small filesystem written for this test on a
-// raw file, as a Volume, in a Disc: transactions put the staging back and reload; validateAll vetoes a save; the
-// default retro-files mapping and placement; and detection: tiers, the probes' order, when to ask, when to hand the
-// disc on. QtCore only.
+// raw file, as a Volume, in a Disc: transactions put the staging back and reload; validateAll vetoes a save, and
+// validateTouched only for the mounts a change touches; the default retro-files mapping and placement; and detection:
+// tiers, the probes' order, when to ask, when to hand the disc on. QtCore only.
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
@@ -205,6 +205,30 @@ int main(int argc, char **argv) {
         disc.addMount({"other", toy2});
         r = disc.validateAll();
         CHECK(r.errors == QStringList({"other: the toy is broken"}) && r.info.size() == 2 && r.info[0].startsWith("toy: "), "labelled lines");
+
+        printf("validateTouched: only a mount the staged writes touch can veto (step 5i)\n");
+        bool otherTouched = false;
+        disc.mounts()[1].touched = [&] { return otherTouched; };
+        QVector<Report> per;
+        r = disc.validateTouched(&per);
+        CHECK(!disc.dirty() && r.ok() && r.info.isEmpty() && per.size() == 2 && per[0].info.isEmpty() && per[1].errors.isEmpty(),
+              "nothing staged: no mount is checked");
+        CHECK(disc.transact([&](QString *e) { return toy->write(Path(), "THREE", "x", {}, QDateTime(), false, e); }, &err) && disc.dirty(),
+              "a change to the first mount");
+        r = disc.validateTouched(&per);
+        CHECK(r.ok() && r.info == QStringList({"toy: 2 files"}) && per.size() == 2 && per[0].info.size() == 1 && per[1].info.isEmpty(),
+              "an untouched broken mount doesn't veto; the touched one (no touched function: the whole disc) is checked");
+        otherTouched = true;
+        r = disc.validateTouched(&per);
+        CHECK(r.errors == QStringList({"other: the toy is broken"}) && per[1].errors == QStringList({"the toy is broken"}),
+              "a touched broken mount vetoes: " + r.errors.join("; "));
+        CHECK(disc.validateAll().errors == r.errors, "validateAll checks every mount, touched or not");
+        otherTouched = false;
+        toy->corrupt = true;
+        r = disc.validateTouched();
+        CHECK(r.errors == QStringList({"toy: the toy is broken"}), "the touched mount's errors, labelled");
+        toy->corrupt = false;
+        disc.revert();
     }
 
     printf("retro-files: the default mapping, placement\n");

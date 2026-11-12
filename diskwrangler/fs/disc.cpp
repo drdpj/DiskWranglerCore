@@ -44,11 +44,16 @@ bool Disc::transact(const std::function<bool(QString *)> &f, QString *err) {
     return false;
 }
 
-Report Disc::validateAll(QVector<Report> *perMount) const {
+Report Disc::validateAll(QVector<Report> *perMount) const { return validate(false, perMount); }
+
+Report Disc::validateTouched(QVector<Report> *perMount) const { return validate(true, perMount); }
+
+Report Disc::validate(bool touchedOnly, QVector<Report> *perMount) const {
     Report r;
     if (perMount) perMount->clear();
     for (const Mount &m : m_mounts) {
-        if (!m.vol) { if (perMount) perMount->append(Report()); continue; }
+        const bool touched = m.touched ? m.touched() : dirty();
+        if (!m.vol || (touchedOnly && !touched)) { if (perMount) perMount->append(Report()); continue; }
         const Report v = m.vol->check();
         if (perMount) perMount->append(v);
         const QString p = m_mounts.size() > 1 ? m.label + ": " : QString();

@@ -47,6 +47,9 @@ public:
         QString readOnlyWhy;
         QString group;                   // mounts with the same group show as several roots in one tree (DFS sides);
                                          // different groups as tabs (ADFS / DOS)
+        // Whether the staged writes touch this mount (validateTouched). Empty: any staged write does (the mount
+        // takes the whole disc). Acorn's DOS Plus partition inside ADFS gives its own region.
+        std::function<bool()> touched;
     };
 
     // The container must outlive the Disc. (An app's image class may own it: Acorn's Adfs::Image does.)
@@ -66,6 +69,10 @@ public:
     // Every mount's check(), with the mount's label in front of each line. Errors veto a commit. perMount (if given)
     // gets each mount's own report, in mount order, as check() gave it (an empty one for a mount with no volume).
     Report validateAll(QVector<Report> *perMount = nullptr) const;
+    // The same for the mounts the staged writes touch (Mount::touched); the others are left out (an empty report in
+    // perMount). A window lets only a volume its changes touch veto a save (an untouched DOS partition with errors,
+    // opened read-only, doesn't stop an ADFS change being saved); the command line checks every mount (validateAll).
+    Report validateTouched(QVector<Report> *perMount = nullptr) const;
     // Saves: validateAll() (as SaveOptions::validate, before anything else), then the container's checked save.
     // o.validate and o.verify are kept and run as well. Every volume reloads afterwards.
     bool commit(device::Container::SaveOptions o, QString *err);
@@ -73,6 +80,7 @@ public:
     void revert();                       // drops the staged writes; every volume reloads
 
 private:
+    Report validate(bool touchedOnly, QVector<Report> *perMount) const;
     bool reloadAll(QString *err);
     device::Container *m_c = nullptr;
     QVector<Mount> m_mounts;
