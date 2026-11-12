@@ -32,11 +32,13 @@
 // set, a format, DFS letters or side order stays in the program (it may test fsId(), the kit never does). Texts the
 // user sees come from the program where the two programs differ; the kit's own texts are the ones both used.
 //
-// How a program builds on it (CP/M Disk Wrangler's MainWindow is the example):
+// How a program builds on it (CP/M Disk Wrangler's MainWindow is the example of one pane; Acorn Disk Wrangler's, of
+// several pane groups as tabs that come and go with the disc):
 //  1. In its constructor, setupKit() first: it makes the panes (paneGroups(), createPane(), paneLayout()) and the
 //     standard actions (actionSpec() gives each one's text, keys and icon text; an empty text leaves it out).
 //  2. Build the menus, the button bar and its own actions from action(Act::...) in its own order.
-//  3. refresh(). After any change: refresh(); the kit keeps the rows' expansion and selection.
+//  3. refresh(). After any change: refresh() (or refreshChanged); the kit keeps the rows' expansion and selection as
+//     the pane's layout says, and shows each group's tab or not as paneShown says.
 // Slots a test calls by name stay on the program's window (as forwarding functions if the kit does the work) until
 // the tests are ported after step 5.
 
@@ -145,6 +147,8 @@ public:
     QVector<VolumePane *> panes() const { return m_panes; }
     // The pane the user works in now (the current tab), or null.
     VolumePane *currentPane() const;
+    // The tabs, when there are several pane groups (null with one).
+    QTabWidget *tabWidget() const { return m_tabs; }
 
     // ----- the selection
     // The files the selection stands for, in order, each once: a selected file, and every file under a selected folder,
@@ -157,9 +161,11 @@ public:
     bool writable(int mount) const { return readOnlyReason(mount).isEmpty(); }
 
     // ----- the reference actions, for programs and tests
-    // Removes the files in one transaction: all of them, or (on any failure, canRemove's included) none.
+    // Removes the files (or folders, with what is in them) in one transaction: all of them, or (on any failure,
+    // canRemove's included) none.
     bool deleteFiles(const QVector<Item> &items, QString *err);
-    // The files as transfer items (Volume::read; names, hostName, dates and toRetroIn attributes as the volume gives them).
+    // The files as transfer items (Volume::read; names, hostName, dates and toRetroIn attributes as the volume gives
+    // them). A folder is an item with its contents as kids, in the volume's order.
     bool exportItems(const QVector<Item> &items, QVector<TransferItem> *out, QString *err) const;
     // Extract without the folder question: the files written into dir by the program's HostPolicy. false: they couldn't
     // be read (err); otherwise the files that couldn't be written are in *errors, the rest are written, and *json gets
@@ -173,8 +179,8 @@ public:
 
     // ----- importing (importsession.h): Add files, drops, Paste and drops from another window all end here
     // Imports items into dir of mount through an ImportSession with the program's importHooks(mount) (the conflict
-    // question is askReplace, answered Replace under autoAnswer), then refresh() and importSummary(). readErrors: what
-    // the program couldn't read (host files), first in the result's errors. Returns the result.
+    // question is askReplace, answered Replace under autoAnswer), then refreshChanged({mount}) and importSummary().
+    // readErrors: what the program couldn't read (host files), first in the result's errors. Returns the result.
     xfer::ImportResult importItems(int mount, const fs::Path &dir, const QVector<TransferItem> &items,
                                    const QStringList &froms = {}, const QVector<xfer::ImportError> &readErrors = {});
 
@@ -212,10 +218,10 @@ public slots:
     virtual void revert();
     virtual void deleteSelected();
     virtual void extractSelected();
-    // Properties: propertiesItems() → the program's propertiesEditor (its dialog) → applyProperties → refresh().
+    // Properties: propertiesItems() → the program's propertiesEditor (its dialog) → applyProperties → refreshChanged().
     virtual void editProperties();
     // A disc attribute (key: "title", "label", "boot" ... as Volume::volumeAttrs names it) of a mount: the program's
-    // volumeEditor (its dialog) → applyVolumeAttrs; refused: message(title, err); then refresh().
+    // volumeEditor (its dialog) → applyVolumeAttrs; refused: message(title, err); then refreshChanged({mount}).
     virtual void editVolume(int mount, const QString &key);
     // Check: Disc::validateAll, each mount's report beside it, shown by showCheck (default: checkText in a message
     // titled "Check disc", a warning if there are errors).
@@ -244,7 +250,11 @@ protected:
     // The pane groups, in order (Disc::Mount::group): one pane each; several are shown as tabs. Default: one pane,
     // which shows every mount.
     virtual QStringList paneGroups() const { return {QString()}; }
+    // A group's tab: its text, and whether it is there at all. Both are asked again at every refresh(), so tabs can
+    // come and go with the disc (Acorn Disk Wrangler: ADFS, DOS Plus, DFS); a tab keeps its place in paneGroups()'
+    // order. Only with several groups (one pane has no tab).
     virtual QString paneTitle(const QString &group) const { return group; }
+    virtual bool paneShown(const QString &) const { return true; }
     virtual PaneLayout paneLayout(const QString &group) const = 0;
     // The pane widget for a group: a program with its own drag-and-drop code returns a VolumePane subclass.
     virtual VolumePane *createPane(const QString &group);
@@ -259,6 +269,11 @@ protected:
     // The files under a folder, user area or (dir empty) root of mount, in the order the selection gives them.
     // Default: Volume::list, depth first.
     virtual void filesUnder(int mount, const fs::Path &dir, QVector<fs::Path> *out) const;
+
+    // After a change to these mounts (Delete, Properties, a disc attribute, an import): the rows again. Default:
+    // refresh(), every pane. A program whose other panes don't show anything those mounts hold refreshes only theirs
+    // (Acorn Disk Wrangler: a DOS or DFS change leaves the ADFS pane, its selection and current row, as they were).
+    virtual void refreshChanged(const QVector<int> &) { refresh(); }
 
     // ----- hooks: title, status line, messages
     // "<file> * - <program>": the file name ("untitled" without one, "no disc" with none open), " *" when changed.
@@ -289,9 +304,20 @@ protected:
     virtual void revertDocument();
 
     // ----- hooks: Delete
+    // What Delete removes (default: selectedFiles(); a program that deletes folders with what is in them gives the
+    // selected rows that aren't inside another selected row).
+    virtual QVector<Item> deleteItems() const { return selectedFiles(); }
     // The question before deleting ("Delete <name>?", "Delete N files?"); the window shows it as a Yes / No box titled
     // "Delete".
     virtual QString deleteQuestion(const QVector<Item> &items) const;
+    // Asks it: true = go ahead (default: deleteQuestion in that box; yes under autoAnswer). A program with a box of
+    // its own (another default button) shows it here.
+    virtual bool confirmDelete(const QVector<Item> &items);
+    // false (default): everything in one transaction, all or nothing (deleteFailedText). true: each item in its own
+    // transaction; the ones that fail are listed after the refresh (deleteItemError, a box titled "Delete"), the rest
+    // are deleted.
+    virtual bool deleteEachOnItsOwn() const { return false; }
+    virtual QString deleteItemError(const Item &item, const QString &err) const { return item.path.name() + ": " + err; }
     // A file the program won't delete (CP/M: a read-only file): false, and err says why. Asked inside the transaction.
     virtual bool canRemove(const Item &, QString *) const { return true; }
     virtual QString deleteFailedText(const QString &err) const { return "Nothing was deleted: " + err; }
@@ -348,7 +374,7 @@ protected:
     // A file exists: Replace, Skip, the "all" answers or Cancel. Default: "<path> already exists. Replace it?" with
     // Yes, Yes to all, No, No to all and Cancel, titled "File exists".
     virtual xfer::Conflict askReplace(int mount, const fs::Path &target, const fs::Entry &existing, const TransferItem &incoming);
-    // After an import (refresh() done): what happened, in the program's words. Default: "Added N file(s) (M replaced),
+    // After an import (refreshChanged done): what happened, in the program's words. Default: "Added N file(s) (M replaced),
     // skipped K." in the status line, and the errors in a box titled "Add files".
     virtual void importSummary(const xfer::ImportResult &r);
 
@@ -357,6 +383,8 @@ protected:
 
 private:
     void showContextMenu(const QPoint &pos);
+    void updateTabs();
+    bool exportEntry(const fs::Volume *v, const fs::Path &path, const fs::Entry &e, TransferItem *t, QString *err, int depth) const;
     QHash<int, QAction *> m_actions;
     QVector<VolumePane *> m_panes;
     QStringList m_groups;

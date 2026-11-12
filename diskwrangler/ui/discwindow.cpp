@@ -74,8 +74,10 @@ void DiscWindow::setupKit() {
     if (m_panes.size() == 1) {
         setCentralWidget(m_panes.first());
     } else {
-        m_tabs = new QTabWidget;
+        m_tabs = new QTabWidget(this);
         for (int i = 0; i < m_panes.size(); ++i) m_tabs->addTab(m_panes[i], paneTitle(m_groups[i]));
+        for (int i = m_panes.size() - 1; i >= 0; --i)       // a tab that isn't wanted yet: its pane stays in the window
+            if (!paneShown(m_groups[i])) m_tabs->removeTab(i);
         connect(m_tabs, &QTabWidget::currentChanged, this, &DiscWindow::updateUi);
         setCentralWidget(m_tabs);
     }
@@ -142,8 +144,26 @@ void DiscWindow::decorateRow(QTreeWidgetItem *row, int, const fs::Path &, const 
     if (entry) row->setText(0, entry->name);
 }
 
+// Each group's tab shown or not, and its text, as the program says now; a tab goes back in its place in the order.
+void DiscWindow::updateTabs() {
+    if (!m_tabs) return;
+    for (int i = 0; i < m_panes.size(); ++i) {
+        const int at = m_tabs->indexOf(m_panes[i]);
+        if (!paneShown(m_groups[i])) {
+            if (at >= 0) m_tabs->removeTab(at);
+            continue;
+        }
+        const QString text = paneTitle(m_groups[i]);
+        if (at >= 0) { m_tabs->setTabText(at, text); continue; }
+        int pos = 0;
+        for (int j = 0; j < i; ++j) if (m_tabs->indexOf(m_panes[j]) >= 0) ++pos;
+        m_tabs->insertTab(pos, m_panes[i], text);
+    }
+}
+
 void DiscWindow::refresh() {
     const fs::Disc *disc = paneDisc();
+    updateTabs();
     for (int i = 0; i < m_panes.size(); ++i) {
         QVector<int> mounts;
         if (disc)
@@ -338,13 +358,29 @@ bool DiscWindow::deleteFiles(const QVector<Item> &items, QString *err) {
     }, err);
 }
 
+bool DiscWindow::confirmDelete(const QVector<Item> &items) {
+    return autoAnswer || QMessageBox::question(this, "Delete", deleteQuestion(items)) == QMessageBox::Yes;
+}
+
 void DiscWindow::deleteSelected() {
-    const QVector<Item> items = selectedFiles();
+    const QVector<Item> items = deleteItems();
     if (items.isEmpty()) return;
-    if (!autoAnswer && QMessageBox::question(this, "Delete", deleteQuestion(items)) != QMessageBox::Yes) return;
+    if (!confirmDelete(items)) return;
+    QVector<int> mounts;
+    for (const Item &i : items) if (!mounts.contains(i.mount)) mounts << i.mount;
+    if (deleteEachOnItsOwn()) {
+        QStringList errors;
+        for (const Item &i : items) {
+            QString err;
+            if (!deleteFiles({i}, &err)) errors << deleteItemError(i, err);
+        }
+        refreshChanged(mounts);
+        if (!errors.isEmpty()) message("Delete", errors.join("\n"));
+        return;
+    }
     QString err;
     if (!deleteFiles(items, &err)) message("Delete", deleteFailedText(err));
-    refresh();
+    refreshChanged(mounts);
 }
 
 // ------------------------------------------------------------------------------------------- Properties, disc attributes, Check
@@ -373,19 +409,21 @@ void DiscWindow::editProperties() {
     if (items.isEmpty()) return;
     PropertiesEdit edit;
     if (!propertiesEditor(items, &edit)) return;
+    QVector<int> mounts;
+    for (const Item &i : items) if (!mounts.contains(i.mount)) mounts << i.mount;
     if (edit.eachOnItsOwn) {
         QStringList errors;
         for (const PropertyChange &c : edit.changes) {
             QString err;
             if (!applyProperties({c}, &err)) errors << propertiesItemError(c, err);
         }
-        refresh();
+        refreshChanged(mounts);
         if (!errors.isEmpty()) message("Properties", errors.join("\n"));
         return;
     }
     QString err;
     if (!applyProperties(edit.changes, &err)) message("Properties", propertiesFailedText(err));
-    refresh();
+    refreshChanged(mounts);
 }
 
 bool DiscWindow::applyVolumeAttrs(int mount, const fs::AttrValues &values, QString *err) {
@@ -404,7 +442,7 @@ void DiscWindow::editVolume(int mount, const QString &key) {
     if (!volumeEditor(mount, key, &edit)) return;
     QString err;
     if (!applyVolumeAttrs(mount, edit.values, &err)) message(edit.title, err);
-    refresh();
+    refreshChanged({mount});
 }
 
 QString DiscWindow::checkText(const fs::Report &all, const QVector<fs::Report> &) const {
@@ -440,13 +478,28 @@ bool DiscWindow::exportItems(const QVector<Item> &items, QVector<TransferItem> *
         fs::Entry e;
         if (!v->stat(i.path, &e, err)) return false;
         TransferItem t;
-        if (!v->read(i.path, &t.data, err)) return false;
-        t.name = e.name;
-        t.hostName = v->hostNameFor(e);
-        t.when = e.modified;
-        t.attrs = v->toRetroIn(i.path.parent(), e);
-        t.sourceFs = v->fsId();
+        if (!exportEntry(v, i.path, e, &t, err, 0)) return false;
         out->append(t);
+    }
+    return true;
+}
+
+bool DiscWindow::exportEntry(const fs::Volume *v, const fs::Path &path, const fs::Entry &e, TransferItem *t, QString *err,
+                             int depth) const {
+    t->name = e.name;
+    t->hostName = v->hostNameFor(e);
+    t->when = e.modified;
+    t->attrs = v->toRetroIn(path.parent(), e);
+    t->sourceFs = v->fsId();
+    t->isDir = e.isDir();
+    if (!e.isDir()) return v->read(path, &t->data, err);
+    if (depth > 64) { *err = "directory nesting too deep"; return false; }
+    QVector<fs::Entry> kids;
+    if (!v->list(path, &kids, err)) return false;
+    for (const fs::Entry &k : kids) {
+        TransferItem x;
+        if (!exportEntry(v, path.child(k.name), k, &x, err, depth + 1)) return false;
+        t->kids.append(x);
     }
     return true;
 }
@@ -515,7 +568,7 @@ xfer::ImportResult DiscWindow::importItems(int mount, const fs::Path &dir, const
     };
     ImportSession s(d && d->isOpen() ? &d->disc() : nullptr, mount, h);
     const xfer::ImportResult r = s.run(items, froms, dir, readOnlyReason(mount), readErrors);
-    refresh();
+    refreshChanged({mount});
     importSummary(r);
     return r;
 }

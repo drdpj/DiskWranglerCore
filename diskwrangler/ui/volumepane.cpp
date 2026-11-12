@@ -77,6 +77,11 @@ void VolumePane::refresh() {
     // what the rows were: expanded or not (every row), selected (files, or every kind)
     m_expanded.clear();
     QSet<QString> sel;
+    QString cur;
+    if (m_layout.keepCurrent && currentItem()) {
+        const PaneRow r = rowOf(currentItem());
+        if (r.valid()) cur = key(r.mount, r.path);
+    }
     QList<QTreeWidgetItem *> q;
     for (int i = 0; i < topLevelItemCount(); ++i) q << topLevelItem(i);
     while (!q.isEmpty()) {
@@ -85,7 +90,7 @@ void VolumePane::refresh() {
         if (r.valid()) {
             const QString k = key(r.mount, r.path);
             m_expanded.insert(k, it->isExpanded());
-            if (it->isSelected() && (r.isFile() || m_layout.reselectFolders)) sel.insert(k);
+            if (it->isSelected() && m_layout.keepSelection && (r.isFile() || m_layout.reselectFolders)) sel.insert(k);
         }
         for (int i = 0; i < it->childCount(); ++i) q << it->child(i);
     }
@@ -99,19 +104,23 @@ void VolumePane::refresh() {
             root->setText(0, m_host->rootLabel(m));
             m_host->decorateRow(root, m, fs::Path(), nullptr);
             addChildren(root, m, fs::Path());
-            root->setExpanded(m_expanded.value(key(m, fs::Path()), true));
+            root->setExpanded(m_layout.rootsAlwaysOpen || m_expanded.value(key(m, fs::Path()), true));
         }
     }
-    // the selection, as it was
-    if (!sel.isEmpty()) {
+    // the selection and the current row, as they were
+    if (!sel.isEmpty() || !cur.isEmpty()) {
+        QTreeWidgetItem *current = nullptr;
         q.clear();
         for (int i = 0; i < topLevelItemCount(); ++i) q << topLevelItem(i);
         while (!q.isEmpty()) {
             QTreeWidgetItem *it = q.takeFirst();
             const PaneRow r = rowOf(it);
-            if (sel.contains(key(r.mount, r.path))) it->setSelected(true);
+            const QString k = key(r.mount, r.path);
+            if (sel.contains(k)) it->setSelected(true);
+            if (k == cur) current = it;
             for (int i = 0; i < it->childCount(); ++i) q << it->child(i);
         }
+        if (current) setCurrentItem(current, 0, QItemSelectionModel::NoUpdate);
     }
     m_expanded.clear();
 }
@@ -121,6 +130,7 @@ void VolumePane::addChildren(QTreeWidgetItem *parent, int mount, const fs::Path 
     QVector<fs::Entry> entries;
     QString err;
     if (!v->list(dir, &entries, &err)) { m_host->listFailed(parent, mount, dir, err); return; }
+    m_host->orderRows(mount, dir, &entries);
     for (const fs::Entry &e : entries) {
         const fs::Path p = dir.child(e.name);
         auto *it = new QTreeWidgetItem(parent);
@@ -128,7 +138,7 @@ void VolumePane::addChildren(QTreeWidgetItem *parent, int mount, const fs::Path 
         it->setText(0, e.name);
         m_host->decorateRow(it, mount, p, &e);
         if (!e.isDir()) continue;
-        addChildren(it, mount, p);
+        if (m_host->listChildren(mount, p, p.parts.size())) addChildren(it, mount, p);
         const QString k = key(mount, p);
         it->setExpanded(m_expanded.contains(k) ? m_expanded.value(k) : m_layout.expand == PaneLayout::ExpandAll);
     }

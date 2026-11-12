@@ -49,6 +49,15 @@ struct PaneLayout {
     // After a refresh, rows selected before are selected again: every kind (the default), or files only (CP/M Disk
     // Wrangler has always let a selected user area or side go).
     bool reselectFolders = true;
+    // false: nothing is selected again after a refresh, and there is no current row (Acorn Disk Wrangler's ADFS and
+    // DOS panes, which have always been rebuilt from nothing); reselectFolders is then not used.
+    bool keepSelection = true;
+    // The row that was current is made current again after a refresh, without changing the selection (Acorn Disk
+    // Wrangler's DFS pane, where the current row says which side is in use).
+    bool keepCurrent = false;
+    // Root rows are expanded at every refresh, whatever they were before (Acorn Disk Wrangler's ADFS and DOS panes);
+    // otherwise only when first seen.
+    bool rootsAlwaysOpen = false;
 };
 
 // One row: the mount it is in, its path there (the root: an empty path), and what it is.
@@ -73,6 +82,13 @@ public:
     virtual void decorateRow(QTreeWidgetItem *row, int mount, const fs::Path &path, const fs::Entry *entry) const = 0;
     // A directory that couldn't be listed (err): by default the row says so in its tooltip.
     virtual void listFailed(QTreeWidgetItem *row, int mount, const fs::Path &path, const QString &err) const;
+    // The order of a directory's rows: by default the volume's own (Volume::list). Acorn Disk Wrangler sorts a DFS
+    // catalogue by directory letter and name.
+    virtual void orderRows(int, const fs::Path &, QVector<fs::Entry> *) const {}
+    // Whether the rows under a directory row are made; depth is the number of names in its path. false: the row is
+    // shown with nothing under it (Acorn Disk Wrangler stops at a directory it has already shown, a loop on a damaged
+    // disc, and at its depth limits). Called after the row's decorateRow. Default: always.
+    virtual bool listChildren(int, const fs::Path &, int) const { return true; }
 };
 
 class VolumePane : public QTreeWidget {
