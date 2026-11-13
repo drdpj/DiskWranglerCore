@@ -18,6 +18,7 @@
 #include "fat.h"
 
 #include <diskwrangler/app/clock.h>
+#include <diskwrangler/fs/presets.h>
 
 #include <cstring>
 
@@ -656,6 +657,40 @@ Report Volume::check() {
                   .arg(files).arg(dirs - 1).arg(m_clusters - used - bad).arg(m_clusters)
                   .arg(m_fat16 ? "FAT16" : "FAT12").arg(clusterBytes());
     return r;
+}
+
+// ------------------------------------------------------------------------------------------------ new discs
+
+void addPresets(fs::PresetRegistry &r) {
+    struct P { const char *id, *name, *suffix; Format fmt; int cyls, spt, secSize; bool sideOrder; };
+    static const P list[] = {
+        {"dos-800", "Acorn DOS Plus 800K", "img", FmtAcorn800, 80, 5, 1024, true},
+        {"pc-360", "PC 360K - 40 track, double-sided", "img", FmtPc360, 40, 9, 512, false},
+        {"pc-720", "PC 720K - 80 track, double-sided", "img", FmtPc720, 80, 9, 512, false},
+        {"pc-1200", "PC 1.2M - 80 track, double-sided, high density", "img", FmtPc1200, 80, 15, 512, false},
+        {"pc-1440", "PC 1.44M - 80 track, double-sided, high density", "img", FmtPc1440, 80, 18, 512, false},
+    };
+    for (const P &l : list) {
+        fs::Preset p;
+        p.id = l.id;
+        p.name = l.name;
+        p.fsId = "fat";
+        p.source = "fat";
+        p.cylinders = l.cyls;
+        p.heads = 2;
+        p.sectors = l.spt;
+        p.sectorSize = l.secSize;
+        const Params s = Volume::standard(l.fmt);
+        p.bytes = quint64(s.total) * s.bps;
+        p.containers = QStringList{"raw", "imd", "edsk", "dsk"};
+        p.suffix = l.suffix;
+        p.doubleSided = true;
+        p.sideOrder = l.sideOrder;
+        p.titleWhat = "Volume label";
+        p.titleMax = 11;
+        p.extra["fatFormat"] = int(l.fmt);
+        r.add(p);
+    }
 }
 
 } // namespace fat

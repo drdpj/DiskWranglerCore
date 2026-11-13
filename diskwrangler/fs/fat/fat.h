@@ -30,6 +30,7 @@
 #include <diskwrangler/fs/volume.h>
 
 namespace dw {
+namespace fs { class PresetRegistry; }
 namespace fat {
 
 typedef fs::Report Report;
@@ -61,6 +62,12 @@ struct Params {
 
 // The fixed layouts from the format table (PC floppies and the two Acorn DOS Plus floppy formats).
 enum Format { FmtPc360, FmtPc720, FmtPc1200, FmtPc1440, FmtAcorn800, FmtAcorn640 };
+
+// The FAT module's presets (fs/presets.h), added to r in this order: Acorn DOS Plus 800K (dos-800: a side order to
+// choose), then the PC floppies pc-360, pc-720, pc-1200, pc-1440 (always interleaved); title "Volume label", 11
+// characters; extra "fatFormat" = the Format above. (Moved from Acorn Disk Wrangler's NewDisc. The DOS Plus 640K
+// disc is not here: it is an ADFS disc too, and needs Acorn's DOSBOOT, so it is Acorn Disk Wrangler's.)
+void addPresets(fs::PresetRegistry &r);
 
 class Volume {
 public:

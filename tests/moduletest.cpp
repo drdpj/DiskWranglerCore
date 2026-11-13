@@ -16,6 +16,7 @@
 #include <diskwrangler/fs/disc.h>
 #include <diskwrangler/fs/fat/fatprobe.h>
 #include <diskwrangler/fs/fat/fatvolume.h>
+#include <diskwrangler/fs/presets.h>
 
 using namespace dw;
 
@@ -262,6 +263,50 @@ int main(int argc, char **argv) {
         fat::Found f = std::any_cast<fat::Found>(v.bestCandidate()->data);
         CHECK(v.bestCandidate()->description == "Acorn DOS Plus 800K floppy" && f.acorn800 && f.fromTable && f.sides.doubleSided() &&
                   !f.sides.sequential && !f.sidesConfirmed, "Acorn 800K, blank: interleaved, not confirmed");
+    }
+
+    printf("New-disc presets: the registry and the module presets (step 5m)\n");
+    {
+        fs::PresetRegistry r;
+        dfs::addPresets(r);
+        fat::addPresets(r);
+        QStringList ids;
+        for (const fs::Preset &p : r.all()) ids << p.id;
+        CHECK(ids == QStringList({"dfs-ss40", "dfs-ss80", "dfs-ds40", "dfs-ds80", "wat-ss40", "wat-ss80", "wat-ds40", "wat-ds80",
+                                  "dos-800", "pc-360", "pc-720", "pc-1200", "pc-1440"}), "DFS then FAT, in order: " + ids.join(' '));
+        dfs::addPresets(r);
+        CHECK(r.all().size() == 13 && r.all()[0].id == "dfs-ss40" && r.all()[8].id == "dos-800", "adding a module's presets again changes nothing");
+        const fs::Preset *p = r.find("DFS-DS80");
+        CHECK(p && p->id == "dfs-ds80" && p->name == "DFS - 2 x 200K, 80 track, double-sided (.dsd)" && p->fsId == "dfs" && p->source == "dfs",
+              "find ignores case; the DFS 80-track double-sided preset");
+        CHECK(p && p->cylinders == 80 && p->heads == 2 && p->sectors == 10 && p->sectorSize == 256 && p->bytes == 409600 &&
+                  p->doubleSided && p->sideOrder && p->suffix == "dsd" && p->titleWhat == "Disc title" && p->titleMax == 12 &&
+                  !p->extra.value("watford").toBool(), "its size, shape, side order and title");
+        p = r.find("wat-ss40");
+        CHECK(p && p->name == "Watford DFS 62-file - 100K, 40 track, single-sided (.ssd)" && p->bytes == 102400 && p->heads == 1 &&
+                  !p->sideOrder && p->suffix == "ssd" && p->extra.value("watford").toBool(), "Watford 40-track single-sided");
+        p = r.find("dos-800");
+        CHECK(p && p->name == "Acorn DOS Plus 800K" && p->fsId == "fat" && p->bytes == 819200 && p->cylinders == 80 && p->sectors == 5 &&
+                  p->sectorSize == 1024 && p->sideOrder && p->suffix == "img" && p->titleWhat == "Volume label" && p->titleMax == 11 &&
+                  p->extra.value("fatFormat").toInt() == fat::FmtAcorn800, "Acorn DOS Plus 800K: a side order to choose");
+        p = r.find("pc-1440");
+        CHECK(p && p->name == "PC 1.44M - 80 track, double-sided, high density" && p->bytes == 1474560 && p->heads == 2 && p->sectors == 18 &&
+                  p->doubleSided && !p->sideOrder && p->extra.value("fatFormat").toInt() == fat::FmtPc1440, "PC 1.44M: always interleaved");
+        bool sizes = true;
+        for (const fs::Preset &q : r.all())
+            sizes = sizes && q.bytes == quint64(q.cylinders) * quint64(q.heads) * quint64(q.sectors) * quint64(q.sectorSize) &&
+                    q.containers == QStringList({"raw", "imd", "edsk", "dsk"});
+        CHECK(sizes, "every module preset's size is its geometry; every one can be raw, ImageDisk, extended or standard DSK");
+        fs::Preset own;
+        own.id = "pc-720";
+        own.name = "mine";
+        own.source = "app";
+        r.add(own);
+        CHECK(r.all().size() == 13 && r.all()[10].name == "mine" && r.fromSource("app").size() == 1, "the same id replaces in place");
+        r.removeSource("dfs");
+        CHECK(r.all().size() == 5 && !r.find("dfs-ss40") && r.find("pc-360"), "removeSource takes out one source's presets");
+        CHECK(!r.find("adfs-s"), "an unknown id: null");
+        CHECK(&fs::presets() == &fs::presets() && fs::presets().all().isEmpty(), "the program's registry: one, empty until something adds to it");
     }
 
     printf(failures ? "\n%d FAILED\n" : "\nall ok\n", failures);

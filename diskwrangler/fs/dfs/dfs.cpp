@@ -17,6 +17,8 @@
  */
 #include "dfs.h"
 
+#include <diskwrangler/fs/presets.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -547,6 +549,43 @@ Report Disc::check() {
                   .arg(m_watford ? QString(" (Watford 62-file catalogue)") : QString())
                   .arg(m_files.size()).arg(freeSectors()).arg(m_sectors);
     return r;
+}
+
+// ------------------------------------------------------------------------------------------------ new discs
+
+void addPresets(fs::PresetRegistry &r) {
+    struct P { const char *id, *name; int tracks; bool ds, wat; };
+    static const P list[] = {
+        {"dfs-ss40", "DFS - 100K, 40 track, single-sided (.ssd)", 40, false, false},
+        {"dfs-ss80", "DFS - 200K, 80 track, single-sided (.ssd)", 80, false, false},
+        {"dfs-ds40", "DFS - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, false},
+        {"dfs-ds80", "DFS - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, false},
+        {"wat-ss40", "Watford DFS 62-file - 100K, 40 track, single-sided (.ssd)", 40, false, true},
+        {"wat-ss80", "Watford DFS 62-file - 200K, 80 track, single-sided (.ssd)", 80, false, true},
+        {"wat-ds40", "Watford DFS 62-file - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, true},
+        {"wat-ds80", "Watford DFS 62-file - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, true},
+    };
+    for (const P &l : list) {
+        fs::Preset p;
+        p.id = l.id;
+        p.name = l.name;
+        p.fsId = "dfs";
+        p.source = "dfs";
+        p.cylinders = l.tracks;
+        p.heads = l.ds ? 2 : 1;
+        p.sectors = SectorsPerTrack;
+        p.sectorSize = SectorSize;
+        p.bytes = quint64(p.cylinders) * quint64(p.heads) * quint64(p.sectors) * quint64(p.sectorSize);
+        p.containers = QStringList{"raw", "imd", "edsk", "dsk"};
+        p.suffix = l.ds ? "dsd" : "ssd";
+        p.doubleSided = l.ds;
+        p.sideOrder = l.ds;
+        p.titleWhat = "Disc title";
+        p.titleMax = 12;
+        p.notes = l.wat ? "Watford DFS's 62-file catalogue: a second catalogue in sectors 2-3" : QString();
+        p.extra["watford"] = l.wat;
+        r.add(p);
+    }
 }
 
 } // namespace dfs

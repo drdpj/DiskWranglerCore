@@ -47,13 +47,15 @@ add_library(DiskWrangler::Device ALIAS diskwrangler-device)
 target_include_directories(diskwrangler-device PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-device PUBLIC Qt${QT_VERSION_MAJOR}::Core)
 
-# The filesystem layer (QtCore only): Volume, Disc, detection by tiers.
+# The filesystem layer (QtCore only): Volume, Disc, detection by tiers, new-disc presets.
 add_library(diskwrangler-fs STATIC
     diskwrangler/fs/detection.cpp
     diskwrangler/fs/disc.cpp
+    diskwrangler/fs/presets.cpp
     diskwrangler/fs/volume.cpp
     diskwrangler/fs/detection.h
     diskwrangler/fs/disc.h
+    diskwrangler/fs/presets.h
     diskwrangler/fs/volume.h)
 add_library(DiskWrangler::Fs ALIAS diskwrangler-fs)
 target_include_directories(diskwrangler-fs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

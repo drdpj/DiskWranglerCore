@@ -33,6 +33,7 @@
 #include <diskwrangler/fs/volume.h>
 
 namespace dw {
+namespace fs { class PresetRegistry; }
 namespace dfs {
 
 typedef fs::Report Report;
@@ -92,6 +93,13 @@ bool parseAddr(const QString &text, quint32 *out);
 // acornDfsCatalogue.)
 QByteArray cpmFenceCatalogue(int sectorsPerSide);       // sectors 0-1 (512 bytes)
 bool isCpmFence(const QByteArray &first512);           // one file, $.CPMDISC
+
+// ----- new discs
+// The DFS module's presets (fs/presets.h), added to r in this order: Acorn DFS single-sided 40 and 80 tracks,
+// double-sided 40 and 80 tracks, then the same four as Watford DFS 62-file discs (extra "watford" = true). Ids
+// dfs-ss40, dfs-ss80, dfs-ds40, dfs-ds80, wat-ss40 ... wat-ds80; 10 sectors of 256 bytes a track; title "Disc title",
+// 12 characters; a double-sided disc has a side order to choose. (Moved from Acorn Disk Wrangler's NewDisc.)
+void addPresets(fs::PresetRegistry &r);
 
 // ----- copying DFS files to a filesystem with directories (ADFS)
 // What a directory letter becomes there (docs/design.md, "DFS directory letters"): $ is the target directory itself;
