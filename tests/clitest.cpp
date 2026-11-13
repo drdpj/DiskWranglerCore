@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 0.5.0)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 0.13.1)"), "--version: " + QString(r.out.trimmed()));
         r = dwcli({});
         CHECK(r.exit == 2, "no command: exit 2");
         r = dwcli({"frobnicate", img});

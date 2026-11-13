@@ -41,7 +41,7 @@
 #include <diskwrangler/xfer/importer.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
-#define DW_CORE_VERSION "0.5.0"
+#define DW_CORE_VERSION "0.13.1"      // the core tag this source is; raise it with every tag
 
 namespace dw {
 namespace cli {
