@@ -1522,47 +1522,33 @@ QJsonObject containerInfo(const QString &path, const device::Container &c) {
     return o;
 }
 
-static bool readHostOne(const QString &path, const HostFileFilter &accept, TransferItem *out, QString *err, int *exit) {
-    const QFileInfo fi(path);
-    if (!fi.exists()) { *err = QString("%1: no such file or folder").arg(path); *exit = ExitNotFound; return false; }
-    TransferItem t;
-    t.name = fi.fileName().isEmpty() ? QDir(path).dirName() : fi.fileName();
-    t.when = fi.lastModified();
-    if (fi.isDir()) {
-        t.isDir = true;
-        const QFileInfoList l = QDir(path).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name | QDir::IgnoreCase | QDir::DirsFirst);
-        for (const QFileInfo &k : l) {
-            TransferItem kid;
-            const QString p = k.absoluteFilePath();
-            if (k.isDir()) {
-                if (!readHostOne(p, accept, &kid, err, exit)) return false;
-            } else {
-                QFile f(p);
-                if (!f.open(QIODevice::ReadOnly)) { *err = QString("%1: cannot read (%2)").arg(p, f.errorString()); *exit = ExitFailed; return false; }
-                kid.name = k.fileName();
-                kid.when = k.lastModified();
-                kid.data = f.readAll();
-                if (accept && !accept(p, &kid)) continue;
-            }
-            t.kids.append(kid);
-        }
-    } else {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly)) { *err = QString("%1: cannot read (%2)").arg(path, f.errorString()); *exit = ExitFailed; return false; }
-        t.data = f.readAll();
-        if (accept && !accept(fi.absoluteFilePath(), &t)) { out->name.clear(); *out = TransferItem(); out->hostName = "\x01skip"; return true; }
-    }
-    *out = t;
+// The command line's words for the host reader's first error (xfer/hostread.h): what both console programs say.
+bool hostReadFailed(const QVector<xfer::HostReadError> &errors, QString *err, int *exit) {
+    if (errors.isEmpty()) return false;
+    const xfer::HostReadError &e = errors.first();
+    if (e.kind == xfer::HostReadError::NotFound) { *err = QString("%1: no such file or folder").arg(e.path); *exit = ExitNotFound; }
+    else { *err = QString("%1: cannot read (%2)").arg(e.path, e.reason); *exit = ExitFailed; }
     return true;
 }
 
-bool readHostTree(const QStringList &paths, const HostFileFilter &accept, QVector<TransferItem> *items, QString *err, int *exit) {
-    for (const QString &p : paths) {
-        TransferItem t;
-        if (!readHostOne(p, accept, &t, err, exit)) return false;
-        if (t.hostName == "\x01skip") continue;
-        items->append(t);
+// Before 5l the console programs' own reader; now a forward onto the one host reader (xfer::readHost), with accept
+// asked about each file after it is read, as before.
+static void acceptAll(QVector<TransferItem> *items, const HostFileFilter &accept) {
+    QVector<TransferItem> kept;
+    for (TransferItem &t : *items) {
+        if (t.isDir) { acceptAll(&t.kids, accept); kept << t; continue; }
+        if (!accept(QFileInfo(t.hostPath).absoluteFilePath(), &t)) continue;
+        kept << t;
     }
+    *items = kept;
+}
+
+bool readHostTree(const QStringList &paths, const HostFileFilter &accept, QVector<TransferItem> *items, QString *err, int *exit) {
+    QVector<xfer::HostReadError> errors;
+    QVector<TransferItem> got = xfer::readHost(paths, xfer::HostReadOptions(), &errors);
+    if (hostReadFailed(errors, err, exit)) return false;
+    if (accept) acceptAll(&got, accept);
+    *items += got;
     return true;
 }
 
