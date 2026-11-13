@@ -605,15 +605,19 @@ design above:
    (`extendAddr`, `addrText`, `parseAddr`), the `.inf` line parser and writers (`inf.h`; finding the sidecar file is
    there too, turning it into the program's own flags stays in Acorn Disk Wrangler), `placeLetter`, and Acorn Z80
    CP/M's catalogue (`cpmFenceCatalogue`, `isCpmFence`, which CP/M Disk Wrangler's `acornDfsCatalogue` now calls).
-   The DFS new-disc presets stay in Acorn's `NewDisc` until the presets registry (step 5). `Adfs::Report` is
+   The DFS new-disc presets stay in Acorn's `NewDisc` until the presets registry (step 5; done in step 5m, see
+   Amendments from step 5). `Adfs::Report` is
    `dw::fs::Report`; `src/dfs.h` and `src/dosfs.h` keep `Dfs::` and `Dos::` as namespace aliases for the tests.
 10. **DFS letters on ADFS.** The letters ADFS can't take are decided by the target's own name rule (Acorn Disk
     Wrangler's `isValidNameChar`, which also refuses `% \ |`, so those become `X_NAME` too), and its DFS never makes
     `#`, `*` or `"` directories in the first place. The main window now copies such a file as `X_NAME` with a warning
     in the import summary (before: a directory called `_`). The "flatten" choice exists in the adapter
-    (`AdfsVolume::setFlattenLetters`) but has no setting in the window yet: that comes with step 5's settings.
+    (`AdfsVolume::setFlattenLetters`) but has no setting in the window yet: that comes with step 5's settings (since
+    `letter-fixes` the window has the Tools > *DFS directories become ADFS directories* setting; step 5l applies it, see
+    Amendments from step 5).
 11. **Hand-over** (`app/handoff.h`, `ui/handoffdialog.h`): the program is looked for in the settings key
-    `otherApps/<id>` (no Preferences page for it yet), beside this program, then in the system's registrations;
+    `otherApps/<id>` (no Preferences page for it, and none was added: since step 5g the setting is stored by a Locate...
+    button on the "not found" message), beside this program, then in the system's registrations;
     the started program gets `DISKWRANGLER_HANDOFF=<image>` in its environment and never hands that image back,
     so two programs that disagree can't pass an image to and fro. "Don't show this again" is `handoff/quiet/<id>`.
     When the other program isn't found, CP/M Disk Wrangler keeps its old message with its "Choose a format..."
@@ -654,3 +658,127 @@ Step 4b created v0.5.0: the command-line layer (`diskwrangler/cli/`, QtCore only
     with free space); `--json` is unchanged.
 11. **A name's own warning** (DFS "ADFS can't have a directory called '@'...") already says which name, so the
     importer doesn't prefix it again.
+
+## Amendments from step 5
+
+Step 5 ran as series 5a-5n, core v0.6.0 to v0.13.0 (v0.13.1 is this text and the version string). It built the window
+kit, put both programs' main windows on it, and moved the transfer, import, open, save and new-disc code that the two
+windows shared into the core. What turned out different from the plan above is below, in the order it was built; the
+series' own records (what each one changed, what it tested, what it found) are `design/plan/history-step-5.md` and
+`history-step-5f-5j.md` in the project plan. "UI layer and app kit" above is the plan; where it disagrees with this
+section, this section is what was built.
+
+**The Importer (5a, 5e, 5l).**
+
+1. **`dw::xfer::Importer`** (`diskwrangler/xfer/importer.h`; it began in `dw::cli`, which keeps `using ImportOptions =
+   xfer::ImportOptions`). It takes a conflict callback (Replace, Skip, Replace all, Skip all, Cancel), `onError` Stop
+   or Continue and a directory hook whose answers are Flatten, Into, Skip and Cancel (four, not three). The command
+   line passes neither callback nor hook and stops at the first error; the windows pass a callback and Continue.
+   `Backend::configureTarget` and `prepareIncoming` stay in `dw::cli`.
+2. **Hooks added for the windows** (5e): `PlaceHook` (where an item goes and under what name), `AttrsHook` (the
+   attributes written, given the file being replaced), `ItemGuard` (one `Disc::transact` per file), and the options
+   `renameRepeats` and `exactNames`; `ImportError::why` is the reason without the path. 5l added `ImportError::cause`
+   and `name`, `Importer::setErrorHook` and `ImportOptions::unlockBeforeReplace` (off: the volume itself writes over a
+   locked file, which matters on DFS, where every catalogue write counts the cycle number on). Every default gives
+   the command line what it always gave.
+3. **The guard is per file, not per run.** Under `onError = Continue` the run never fails as a whole, so a
+   transaction round the run would guard nothing; a write that fails half way leaves nothing of that file, and
+   nothing else is ever undone, Cancel included.
+4. **`dw::ui::ImportSession`** (5e) runs the Importer for a window, and `DiscWindow::importItems(mount, dir, items,
+   froms, readErrors)` is the window's one entry point: every Add files, drop, Paste, retro-files drop and the
+   target side of a drop between windows reads its items into `TransferItem`s and ends there. A question or rule
+   that names a filesystem (CP/M's character set, user folders and target user; Acorn's DFS letters and
+   single-letter directory question) is a hook the program fills (`importHooks`, `askReplace`, `importSummary`),
+   never a branch in the kit.
+5. **Two command-line fixes on the way** (neither moved a golden case): `stat` on DFS finds a name written without a
+   letter in `$` (a host file whose `$.NAME` existed was never seen); and "a plain file replacing a file keeps its
+   attributes" now also holds when the item carries no attributes at all. `cpmdw put` and `copy` reach user areas
+   16-31 of a CP/M 2.2 disc, as the window always did.
+
+**The window kit (5c, 5f, 5g, 5i).**
+
+6. **`dw::app::AppInfo`, `dw::app::Document`, `dw::ui::VolumePane`, `dw::ui::DiscWindow`**
+   (`diskwrangler/app/`, `diskwrangler/ui/`). `dw::cli::AppInfo` keeps only the console program's extras and holds the
+   program's `AppInfo` as `program`; `AppInfo` lists the programs it hands discs to (`handsTo`), any number.
+   `Document` is the window's twin of `dw::cli::OpenedImage`: each program's opened-disc class (`Cpm::OpenedDisc`,
+   `Adfs::OpenedDisc`) implements it and its console program saves through the same class.
+7. **Hooks, not a plug-in object.** Where the plan has `appActions()` and `buildMenus()`, the kit has `actionSpec(Act)`
+   (the texts, keys and tool tips of the standard actions the program wants) and the program builds its menus from
+   `action(Act::...)` and its own plain `QAction`s in today's order. The status line is three hooks (`statusVariants`,
+   `presentStatus`, `showMessage`), not an object. Slot names the tests call stay on each program's `MainWindow` as
+   shims.
+8. **`Volume::actions()` and `FsFactory` were not built** (owner, 10 Nov 2026). Every menu item they would have
+   described is a volume attribute (title, label and boot option are `volumeAttrs()`), or belongs to the disc (Side
+   order, Save As kinds: the document), or to the program (Format, Character set, diskdefs). A QtCore `Volume` that
+   described menu items would also have put UI in the command-line build.
+9. **Rows come from the program's own classes.** The plan's display keys in `Entry::attrs` were not needed and would
+   have reached `ls --json`; `decorateRow(row, mount, path, entry)` reads each program's own objects while the rows
+   are made and writes the cells and the legacy roles the tests use. The kit has no drag code: each program's
+   `DropTree` (a `VolumePane` subclass) keeps `startDrag`, the private payload and the acceptance rules, and only the
+   exporter is the kit's (`exportItems`, which gives folders with their contents).
+10. **Tabs and pane differences** (5i): `paneGroups()`, `paneShown(group)` and `paneTitle(group)` are asked at every
+    `refresh()`, so Acorn's tabs come and go with the disc; the kit gained `refreshChanged(mounts)` (a DOS or DFS change
+    remakes only its own pane), the Delete hooks (`deleteItems`, `confirmDelete`, `deleteEachOnItsOwn`,
+    `deleteItemError`), `PaneLayout::keepSelection`, `keepCurrent` and `rootsAlwaysOpen`, and `PaneHost::orderRows`
+    and `listChildren`. Which pane a mount is in is the program's question, never a test in the kit.
+11. **Properties, disc attributes and Check as hooks** (5f). The dialog is the program's; the change, its
+    transaction and the refresh are the kit's: `propertiesEditor(items, edit)` returns `PropertyChange`s (the keys that
+    change, `to` for a new name or place, `eachOnItsOwn` for Acorn's entry-by-entry application), `volumeEditor(mount,
+    key, edit)` returns the values for `setVolumeAttrs`, and Check is `checkText` (the program's words) or
+    `showCheck` (its own box), fed by `Disc::validateAll(&perMount)`. Both programs keep their own Properties and
+    New-disc dialogs (owner, 10 Nov 2026), so the screenshots did not change.
+12. **The open pipeline and Locate...** (5g). `openFile(path, force)` runs `detectImage` (the program's detection,
+    a `Verdict`), the kit's question (`askWhich`) or hand-over (`handOff`, `showNotOpened`), then `openDocument` and
+    `afterOpen`. Deliberate change 7: the "not found" message for a disc another Wrangler owns has a **Locate...**
+    button that stores `otherApps/<id>` for whichever program `Candidate::owner` names; this is what the step-4
+    amendment 11 left as "no Preferences page" and there is still none, and no Tools item.
+13. **Saving.** The window's rule is "only a volume the changes touch can veto a save" (`Disc::validateTouched`,
+    `Disc::Mount::touched`: DOS Plus by its region, DFS by any change; ADFS is always checked by `Image::commit`); the
+    command line keeps `validateAll()` (owner, 10 Nov 2026). The saved copy's DOS and DFS volumes are read again by both
+    the window and `acorndw`. `cpmdw`'s save now also refuses a file changed behind it and counts the files of the
+    written copy. Save, Revert and Save As stay each window's overrides calling the document, because their messages
+    are the program's own.
+
+**Acorn's disc file, host files and new discs (5j, 5l, 5m).**
+
+14. **Save As writes ImageDisk, DSK, extended DSK and raw** for every floppy (deliberate change 8):
+    `Adfs::OpenedDisc::writeCopy` is `acorndw convert`'s code, moved to where both can call it, so the window and the
+    command line write the same bytes; the filter chosen decides the kind, never the name typed. A hard disc keeps its
+    same-kind copy.
+15. **One host-file reader** (5l, deliberate change 9): `dw::xfer::readHost(paths, HostReadOptions, errors)`
+    (`diskwrangler/xfer/hostread.h`), used by `cpmdw`, `acorndw` and both windows, replacing five walkers. It never
+    stops; it returns the items and a list of errors (cannot read, too large, not found). Each program supplies its own
+    per-file hook and size limit (`RetroFiles::cpmHostRead`, `acornHostRead`) and its own messages. A path the user
+    names is read as what it points to; only links met inside a folder are skipped. `TransferItem::hostPath` says
+    where an item was read from, and `dw::cli::readHostTree` is a forward onto the reader.
+16. **DFS letters on ADFS in the window** (5l). The window applies the `dfsLetterDirs` setting in its ADFS `place` hook
+    (`placeLetter`'s flatten option, as `--letters` does for `acorndw`), not through
+    `AdfsVolume::setFlattenLetters`: the hook replaces the volume's `placeIncoming`, so the volume's setting is never
+    consulted. The effect is the same, and `dragtest` checks that the window and `acorndw put` place `.inf`-lettered
+    host files alike.
+17. **The presets registry** (5m): `dw::fs::Preset` and `PresetRegistry` in `diskwrangler/fs/presets.h` (the fs layer,
+    so every module and console program has it), `dw::fs::presets()` the program's one registry, `Preset::source`
+    saying who added each. The DFS module adds the DFS and Watford presets (`dw::dfs::addPresets`) and the FAT module
+    DOS Plus 800K and the PC floppies (`dw::fat::addPresets`); Acorn adds ADFS and DOS Plus 640K, CP/M its format
+    library whenever the library is made. A preset says what a disc is, not how to make it: making the blank disc is
+    still the program's (`NewDisc::create`, `Cpm::makeBlank`), by preset id. Both New-disc dialogs and `new --list`
+    read the registry, unchanged to the user.
+
+**Torch CP/N (5b, `torch-case`).**
+
+18. **Torch CP/N is its own filesystem**: `Torch::Fs` and `Cpm::TorchVolume` beside `Cpm::Volume` and `CpmVolume`, both
+    behind `Cpm::Store`; `Cpm::openStore(img, fmt, err)` picks. `Cpm::Volume` still forwards a Torch format to a
+    `Torch::Fs` as a facade, kept for tests until they are ported (step 6). `Torch::Fs` keeps names as the real Torch's
+    filing system does (read from the MCP and CCCP ROMs; deliberate change 10).
+
+**Tests, and what step 6 inherits.**
+
+19. **Core tests added**: `uitest` sections for the kit, the import session, Properties / attributes / Check, the open
+    pipeline and the tabs and row hooks (`tests/memvolume.h` is an in-memory volume and document to reuse),
+    `importtest`, `volumetest` (`validateTouched`), `xfertest` ("the host reader") and `moduletest` (the module
+    presets). Acorn gained `saveastest` and a `dragtest` check; every existing GUI test passed unchanged, through
+    shims. Step 5 deliberately changed no test; the shims (`dfsTree()`, `dosTree()`, `image()`, `volume(side)`, `XItem`
+    and the retro-files helpers, the roles, the Torch facade) are listed in each series' hand-over, and step 6 ports
+    the tests to the new API and removes them.
+20. **`DW_CORE_VERSION`** (`cli/cli.h`, printed by `--version`) said 0.5.0 from step 4b to v0.13.0; it is 0.13.1 here and
+    `clitest` expects that value. It has to be raised with each tag.

@@ -248,3 +248,11 @@ A unix-style `get -` can't be combined with `--json`.
 `formats`, `hostPolicy`, `readHost`, and optionally `prepareIncoming` and `configureTarget`) and `OpenedImage` (the
 `Disc`, `save`, `app()`, and optionally `convertTo`, `convertSides`, `setCharset`). `tests/clitest.cpp` is a complete
 small example (a FAT backend in 60 lines). The qmake include is `diskwrangler-cli.pri`; CMake links `DiskWrangler::Cli`.
+
+A backend's `readHost` reads host files and folders with the core's one host reader, `dw::xfer::readHost`
+(`diskwrangler/xfer/hostread.h`; the same reader the programs' windows use): folders first, then files, names in order
+ignoring case, symbolic links inside a folder skipped, any depth, the program's size limit checked before a file is
+read. The program gives it its own per-file hook (`.inf` sidecars) and size limit, and turns the errors it returns into
+its own messages; `dw::cli::hostReadFailed` gives the console programs' words and exit codes for the first one
+(`<path>: no such file or folder`, exit 3; `<path>: cannot read (<reason>)`, exit 1). `dw::cli::readHostTree` is a
+forward onto the same reader for a backend that only needs a filter.
