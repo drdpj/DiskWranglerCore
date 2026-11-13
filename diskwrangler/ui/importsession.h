@@ -56,6 +56,8 @@ struct ImportHooks {
     // volume's placeIncoming and fromRetro.
     xfer::PlaceHook place;
     xfer::AttrsHook attrs;
+    // Told of each error the Importer records, as it happens (Importer::setErrorHook); readErrors are not passed to it.
+    xfer::ErrorHook errorHook;
     xfer::ImportOptions options;
 };
 

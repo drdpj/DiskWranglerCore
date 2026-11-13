@@ -61,6 +61,11 @@ struct ImportOptions {
     // that allows lower case, readme.txt is not README.TXT). Otherwise the volume's own case rule
     // (NameRules::caseSensitivity) decides, as the command line does.
     bool exactNames = false;
+    // A locked or read-only file being replaced (a Replace answer, or --force) is unlocked first, then written (the
+    // default). false: written over as it is, for volumes whose write replaces such a file itself (the Acorn window,
+    // step 5l: ADFS, DFS and FAT do, and on DFS every catalogue write counts the cycle number on, so an unlock first
+    // would count it twice).
+    bool unlockBeforeReplace = true;
 };
 
 struct Change {
@@ -76,10 +81,17 @@ struct Change {
 // (Failed 1, Conflict 5, Locked 6).
 struct ImportError {
     enum Kind { None, Failed, Conflict, Locked };
+    // Which check failed, for a program that words its own messages (step 5l: the Acorn window). Other: anything else
+    // (a conflict without a callback, a locked file, a sentence).
+    enum Cause { Other, DirInTheWay, FileInTheWay, MakeDir, Write };
     Kind kind = None;
+    Cause cause = Other;                 // DirInTheWay: a directory where a file was to go; FileInTheWay: a file where a
+                                         // directory was to go (or be made on the way); MakeDir, Write: the volume refused
     QString message;                     // "<display path>: <why>", or a whole sentence
     QString why;                         // the reason alone, as the volume gave it (the same as message for a sentence)
     QString path;                        // the display path on the volume concerned, or empty
+    QString name;                        // the name concerned on the volume: the incoming item's, or (FileInTheWay,
+                                         // MakeDir on the way to a file's place) the directory's; or empty
     QString from;                        // the item's source (froms[i], with "/kid" for a folder's contents)
     bool failed() const { return kind != None; }
 };
@@ -134,6 +146,9 @@ typedef std::function<fs::AttrValues(const TransferItem &item, const fs::Entry *
 // Runs one file's changes (unlocking the file it replaces, then writing it) so that a failure leaves nothing of that
 // file behind: a window passes Disc::transact. Without one the changes are made as they come.
 typedef std::function<bool(const std::function<bool(QString *)> &change, QString *err)> ItemGuard;
+// Told of each error as it is recorded (onError = Continue), so a program can keep its own list in the order things
+// happened (step 5l: the Acorn window lists its DFS-letter warnings among the errors).
+typedef std::function<void(const ImportError &e)> ErrorHook;
 
 class Importer {
 public:
@@ -146,6 +161,7 @@ public:
     void setPlaceHook(const PlaceHook &f) { m_place = f; }
     void setAttrsHook(const AttrsHook &f) { m_attrs = f; }
     void setItemGuard(const ItemGuard &f) { m_guard = f; }
+    void setErrorHook(const ErrorHook &f) { m_errorHook = f; }
 
     // Imports the items into directory dir (made if it doesn't exist). froms[i] is item i's source, for the log.
     // false (onError = Stop only): err says why, and the run is to be abandoned. true: the run finished, or was
@@ -158,7 +174,7 @@ private:
     bool importOne(const TransferItem &it, const QString &from, const fs::Path &dir, const QString &prefix, ImportResult *r);
     bool ensureDir(const fs::Path &dir, ImportResult *r, ImportError *e);
     bool fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from,
-              const QString &why = QString());
+              const QString &why = QString(), ImportError::Cause cause = ImportError::Other, const QString &name = QString());
     bool exists(const fs::Path &p, fs::Entry *e) const;
     QString madeKey(const fs::Path &dir, const QString &name) const;
     QString uniqueName(const fs::Path &dir, const QString &name, NodeKind kind) const;
@@ -171,6 +187,7 @@ private:
     PlaceHook m_place;
     AttrsHook m_attrs;
     ItemGuard m_guard;
+    ErrorHook m_errorHook;
     OnError m_onError = OnError::Stop;
     int m_all = 0;                       // 0 = ask, 1 = replace all, 2 = skip all (a conflict callback's answer)
     bool m_abandon = false;              // stopped by a failure under Stop

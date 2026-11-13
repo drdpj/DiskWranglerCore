@@ -61,12 +61,15 @@ static ImportError makeError(ImportError::Kind kind, const QString &msg, const Q
 
 // Under Continue the item's error is recorded and the run goes on (true); under Stop it is the run's error (false).
 bool Importer::fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from,
-                    const QString &why) {
+                    const QString &why, ImportError::Cause cause, const QString &name) {
     ImportError e = makeError(kind, msg, path);
     e.from = from;
     e.why = why.isEmpty() ? msg : why;
+    e.cause = cause;
+    e.name = name;
     if (m_onError == OnError::Continue) {
         r->errors << e;
+        if (m_errorHook) m_errorHook(e);
         return true;
     }
     m_err = e;
@@ -120,10 +123,20 @@ bool Importer::ensureDir(const fs::Path &dir, ImportResult *r, ImportError *e) {
         const fs::Path next = cur.child(part);
         fs::Entry x;
         if (exists(next, &x)) {
-            if (!x.isDir()) { *e = makeError(ImportError::Failed, QString("a file called %1 is in the way").arg(m_v->displayPath(next)), m_v->displayPath(next)); return false; }
+            if (!x.isDir()) {
+                *e = makeError(ImportError::Failed, QString("a file called %1 is in the way").arg(m_v->displayPath(next)), m_v->displayPath(next));
+                e->cause = ImportError::FileInTheWay;
+                e->name = x.name;
+                return false;
+            }
         } else {
             QString why;
-            if (!m_v->mkdir(cur, part, &why)) { *e = makeError(ImportError::Failed, QString("%1: %2").arg(m_v->displayPath(next), why), m_v->displayPath(next)); return false; }
+            if (!m_v->mkdir(cur, part, &why)) {
+                *e = makeError(ImportError::Failed, QString("%1: %2").arg(m_v->displayPath(next), why), m_v->displayPath(next));
+                e->cause = ImportError::MakeDir;          // (why stays the whole message, as it always was)
+                e->name = part;
+                return false;
+            }
             if (m_v->caps().dirs) {
                 ++r->dirs;
                 Change c; c.op = "mkdir"; c.vol = m_label; c.path = m_v->displayPath(next);
@@ -140,7 +153,7 @@ bool Importer::import(const QVector<TransferItem> &items, const QStringList &fro
     m_err = ImportError();
     ImportError e;
     if (!ensureDir(dir, r, &e)) {
-        fail(r, e.kind, e.message, e.path, m_v->displayPath(dir));
+        fail(r, e.kind, e.message, e.path, m_v->displayPath(dir), e.why, e.cause, e.name);
         if (m_abandon && err) *err = m_err;
         return !m_abandon;
     }
@@ -196,7 +209,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
     if (!p.warning.isEmpty()) r->warnings << (p.warning.startsWith(from + ": ") ? p.warning : QString("%1: %2").arg(from, p.warning));   // a name's own warning may already say which
     {
         ImportError e;
-        if (!ensureDir(p.dir, r, &e)) return fail(r, e.kind, e.message, e.path, from);
+        if (!ensureDir(p.dir, r, &e)) return fail(r, e.kind, e.message, e.path, from, e.why, e.cause, e.name);
     }
     QString name = p.name;
     const NodeKind kind = isDir ? NodeKind::Dir : NodeKind::File;
@@ -212,10 +225,12 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
     const bool there = exists(target, &ex);
 
     if (isDir) {
-        if (there && !ex.isDir()) return fail(r, ImportError::Failed, QString("a file called %1 is in the way").arg(shown), shown, from);
+        if (there && !ex.isDir())
+            return fail(r, ImportError::Failed, QString("a file called %1 is in the way").arg(shown), shown, from, QString(), ImportError::FileInTheWay, name);
         if (!there) {
             QString why;
-            if (!m_v->mkdir(p.dir, name, &why)) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from);
+            if (!m_v->mkdir(p.dir, name, &why))
+                return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why, ImportError::MakeDir, name);
             ++r->dirs;
             Change c; c.op = "mkdir"; c.vol = m_label; c.path = shown; c.from = from; c.note = p.warning;
             r->changes << c;
@@ -228,7 +243,8 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
 
     bool replace = false;
     if (there) {
-        if (ex.isDir()) return fail(r, ImportError::Failed, QString("a directory called %1 is in the way").arg(shown), shown, from);
+        if (ex.isDir())
+            return fail(r, ImportError::Failed, QString("a directory called %1 is in the way").arg(shown), shown, from, QString(), ImportError::DirInTheWay, name);
         bool skip = false, unlock = false;
         if (m_conflict) {                                  // the window's question; "all" answers are remembered
             Conflict a = m_all == 1 ? Conflict::Replace : m_all == 2 ? Conflict::Skip : m_conflict(target, ex, it);
@@ -258,7 +274,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
     // leaves nothing of it)
     QString why;
     const std::function<bool(QString *)> change = [&](QString *e) {
-        if (replace) {
+        if (replace && m_o.unlockBeforeReplace) {
             for (const fs::AttrSpec &s : m_v->fileAttrs()) {
                 if (s.type != fs::AttrSpec::Bool || (s.key != "locked" && s.key != "readonly") || !ex.attrs.value(s.key).toBool()) continue;
                 if (!m_v->setAttrs(target, {{s.key, false}}, e)) return false;
@@ -281,7 +297,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
         return m_v->write(p.dir, name, it.data, attrs, when, replace, e);
     };
     const bool done = m_guard ? m_guard(change, &why) : change(&why);
-    if (!done) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why);
+    if (!done) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why, ImportError::Write, name);
     m_made.insert(madeKey(p.dir, name));
     if (replace) ++r->replaced; else ++r->added;
     Change c; c.op = replace ? "replace" : "add"; c.vol = m_label; c.path = shown; c.from = from; c.note = p.warning;

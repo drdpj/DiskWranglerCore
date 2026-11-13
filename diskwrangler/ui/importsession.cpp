@@ -43,6 +43,7 @@ xfer::ImportResult ImportSession::run(QVector<TransferItem> items, const QString
     if (m_h.dirHook) imp.setDirHook(m_h.dirHook);
     if (m_h.place) imp.setPlaceHook(m_h.place);
     if (m_h.attrs) imp.setAttrsHook(m_h.attrs);
+    if (m_h.errorHook) imp.setErrorHook(m_h.errorHook);
     fs::Disc *disc = m_disc;
     imp.setItemGuard([disc](const std::function<bool(QString *)> &change, QString *err) { return disc->transact(change, err); });
     xfer::ImportError e;

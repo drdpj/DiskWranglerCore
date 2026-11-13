@@ -354,6 +354,72 @@ int main(int argc, char **argv) {
               "json(): the command line's keys only");
     }
 
+    printf("What failed, the error hook, and a locked file left to the volume (step 5l)\n");
+    {
+        auto f = makeFat(d);
+        QString err;
+        CHECK(f->v()->write(fs::Path(), "A", "a", {}, QDateTime(), false, &err) && f->v()->mkdir(fs::Path(), "SUB", &err), "set up: a file A and a directory SUB");
+        Importer imp(f->v(), "DOS", ImportOptions());
+        imp.setOnError(OnError::Continue);
+        imp.setConflictCallback([](const fs::Path &, const fs::Entry &, const TransferItem &) { return Conflict::Replace; });
+        QVector<ImportError> told;
+        imp.setErrorHook([&](const ImportError &e) { told << e; });
+        imp.setPlaceHook([&](const TransferItem &it, const fs::Path &target) {
+            fs::Placement p = f->v()->placeIncoming(it, target);
+            if (it.name == "into.txt") p.dir = fs::Path({"A"});            // a file where a directory must be made
+            if (it.name == "make.txt") p.dir = fs::Path({"NEW", "BAD NAME!"});    // a directory the volume refuses
+            return p;
+        });
+        ImportResult r;
+        ImportError e;
+        CHECK(imp.import({folder("A", {file("k.txt", "k")}), file("SUB", "s"), file("into.txt", "i"), file("make.txt", "m"), file("ok.txt", "o")},
+                         {"f1", "f2", "f3", "f4", "f5"}, fs::Path(), &r, &e),
+              "Continue: the run finishes");
+        CHECK(r.errors.size() == 4 && told.size() == 4, "each error recorded, and told to the hook as it happened");
+        bool same = told.size() == r.errors.size();
+        for (int i = 0; same && i < told.size(); ++i) same = told[i].message == r.errors[i].message && told[i].from == r.errors[i].from;
+        CHECK(same, "the hook is told the same errors, in the same order");
+        CHECK(r.errors.value(0).cause == ImportError::FileInTheWay && r.errors.value(0).name == "A" && r.errors.value(0).from == "f1",
+              "a folder where a file is: FileInTheWay, the folder's name");
+        CHECK(r.errors.value(1).cause == ImportError::DirInTheWay && r.errors.value(1).name == "SUB" && r.errors.value(1).message.contains("is in the way"),
+              "a file where a directory is: DirInTheWay, the file's name, the message as before");
+        CHECK(r.errors.value(2).cause == ImportError::FileInTheWay && r.errors.value(2).name == "A" && r.errors.value(2).from == "f3",
+              "a file in the way of a directory on the way to the file's place: FileInTheWay, the directory's name");
+        CHECK(r.errors.value(3).cause == ImportError::MakeDir && r.errors.value(3).name == "BAD NAME!" && r.errors.value(3).why == r.errors.value(3).message,
+              "a directory the volume won't make on the way: MakeDir, its name (why: the whole message, as before)");
+        CHECK(r.added == 1 && readBack(f->v(), fs::Path({"OK.TXT"})) == "o", "the rest imported");
+
+        auto g = makeDfs(d);
+        for (int i = 0; i < 31; ++i) g->v()->write(fs::Path(), QString("$.F%1").arg(i), "x", {}, QDateTime(), false, &err);
+        Run full = runGui(g->v(), {file("ONEMORE", "1")}, {});
+        CHECK(full.r.errors.size() == 1 && full.r.errors[0].cause == ImportError::Write && full.r.errors[0].name == "ONEMORE" &&
+                  full.r.errors[0].why.contains("catalogue is full") && full.r.errors[0].message.endsWith(": " + full.r.errors[0].why),
+              "a write the volume refuses: Write, the name, why alone");
+    }
+    {   // DFS counts its catalogue's cycle number on at every write: a locked file replaced is one write when left to the
+        // volume (unlockBeforeReplace off), two when unlocked first (the default)
+        auto cycle = [](Fixture *f) { QByteArray b; QString err; f->lin->read(256 + 4, 1, &b, &err); return quint8(b.isEmpty() ? 0 : b.at(0)); };
+        int counted[2];
+        for (int unlock = 0; unlock < 2; ++unlock) {
+            auto f = makeDfs(d);
+            QString err;
+            f->v()->write(fs::Path(), "$.LOCKED", "old", {{"locked", true}}, QDateTime(), false, &err);
+            const quint8 before = cycle(f.get());
+            ImportOptions o;
+            o.unlockBeforeReplace = unlock;
+            Importer imp(f->v(), "drive 0", o);
+            imp.setOnError(OnError::Continue);
+            imp.setConflictCallback([](const fs::Path &, const fs::Entry &, const TransferItem &) { return Conflict::Replace; });
+            ImportResult r;
+            ImportError e;
+            imp.import({file("LOCKED", "new", {{"acorn", QJsonObject{{"access", "L"}}}})}, {"x"}, fs::Path(), &r, &e);
+            counted[unlock] = (cycle(f.get()) >> 4) * 10 + (cycle(f.get()) & 15) - ((before >> 4) * 10 + (before & 15));
+            CHECK(r.replaced == 1 && readBack(f->v(), fs::Path({"$.LOCKED"})) == "new" && statOf(f->v(), fs::Path({"$.LOCKED"})).attrs.value("locked").toBool(),
+                  unlock ? "unlocked first (the default): replaced, locked again as the item says" : "left to the volume: replaced, locked as the item says");
+        }
+        CHECK(counted[0] == 1 && counted[1] == 2, qPrintable(QString("the catalogue written once when left to the volume (%1), twice when unlocked first (%2)").arg(counted[0]).arg(counted[1])));
+    }
+
     printf(failures ? "FAILED: %d\n" : "all ok\n", failures);
     return failures ? 1 : 0;
 }
