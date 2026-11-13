@@ -59,11 +59,14 @@ add_library(DiskWrangler::Fs ALIAS diskwrangler-fs)
 target_include_directories(diskwrangler-fs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-fs PUBLIC DiskWrangler::Device Qt${QT_VERSION_MAJOR}::Core)
 
-# The transfer layer (QtCore only): transfer items, host names, retro-files (.inf / manifest / JSON), the Importer.
+# The transfer layer (QtCore only): transfer items, host names, retro-files (.inf / manifest / JSON), the Importer, the
+# host reader.
 add_library(diskwrangler-xfer STATIC
+    diskwrangler/xfer/hostread.cpp
     diskwrangler/xfer/importer.cpp
     diskwrangler/xfer/retrofiles.cpp
     diskwrangler/xfer/hostname.h
+    diskwrangler/xfer/hostread.h
     diskwrangler/xfer/importer.h
     diskwrangler/xfer/mime.h
     diskwrangler/xfer/retrofiles.h

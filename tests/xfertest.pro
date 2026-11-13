@@ -5,5 +5,5 @@ CONFIG += c++17 console
 CONFIG -= app_bundle
 TARGET = xfertest
 INCLUDEPATH += $$PWD/..
-SOURCES += xfertest.cpp ../diskwrangler/xfer/retrofiles.cpp
-HEADERS += ../diskwrangler/xfer/hostname.h ../diskwrangler/xfer/mime.h ../diskwrangler/xfer/retrofiles.h ../diskwrangler/xfer/transferitem.h
+SOURCES += xfertest.cpp ../diskwrangler/xfer/retrofiles.cpp ../diskwrangler/xfer/hostread.cpp
+HEADERS += ../diskwrangler/xfer/hostname.h ../diskwrangler/xfer/hostread.h ../diskwrangler/xfer/mime.h ../diskwrangler/xfer/retrofiles.h ../diskwrangler/xfer/transferitem.h

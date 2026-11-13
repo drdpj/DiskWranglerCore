@@ -10,7 +10,14 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <cstdio>
+#ifdef Q_OS_UNIX
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+#include <QElapsedTimer>
 #include <diskwrangler/xfer/hostname.h>
+#include <diskwrangler/xfer/hostread.h>
 #include <diskwrangler/xfer/mime.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
@@ -168,6 +175,112 @@ int main(int argc, char **argv) {
         CHECK(cleanStale(prefix, 24 * 3600) == 0 && QFileInfo::exists(old), "recent folders stay");
         CHECK(cleanStale(prefix, -1) >= 2 && !QFileInfo::exists(old), "stale ones go");
         CHECK(newDragDir(tmp.path() + "/no/such/place/x-", &err).isEmpty() && err.contains("temporary folder"), "an error when it can't be made");
+    }
+
+
+    printf("== the host reader (step 5l: one reader for both windows and both console programs)\n");
+    {
+        const QString h = tmp.path() + "/host";
+        auto spit = [](const QString &p, const QByteArray &b) { QDir().mkpath(QFileInfo(p).absolutePath()); QFile f(p); f.open(QIODevice::WriteOnly); f.write(b); };
+        spit(h + "/b.txt", "b"); spit(h + "/A.txt", "a"); spit(h + "/c/in.txt", "in"); spit(h + "/B/x.txt", "x");
+        spit(h + "/a.inf", "inf");
+        QString deep = h + "/D";
+        for (int i = 1; i <= 12; ++i) deep += QString("/d%1").arg(i);
+        spit(deep + "/f.txt", "deep");
+        QFile::link(h + "/b.txt", h + "/zlink.txt");               // links inside a folder: skipped
+        QFile::link(h + "/c", h + "/Zlinkdir");
+        QFile::link(h + "/c", tmp.path() + "/named-link");          // a path given: read as what it points to
+
+        QVector<HostReadError> errors;
+        QVector<TransferItem> it = readHost({h}, HostReadOptions(), &errors);
+        CHECK(errors.isEmpty() && it.size() == 1 && it[0].isDir && it[0].name == "host" && it[0].hostPath == h, "a folder: one item named after it, its host path kept");
+        QStringList names;
+        for (const TransferItem &k : it.value(0).kids) names << k.name;
+        CHECK(names == QStringList({"B", "c", "D", "a.inf", "A.txt", "b.txt"}), qPrintable("folders first, then files, names ignoring case: " + names.join(" ")));
+        CHECK(!names.contains("zlink.txt") && !names.contains("Zlinkdir"), "linked files and folders inside a folder are skipped");
+        const TransferItem *d = it.isEmpty() ? nullptr : &it[0];
+        int depth = 0;
+        for (const TransferItem *x = d; x;) {
+            const TransferItem *next = nullptr;
+            for (const TransferItem &k : x->kids) if (k.isDir && (k.name == "D" || k.name.startsWith('d'))) next = &k;
+            if (!next) {
+                CHECK(depth == 13 && x->kids.size() == 1 && x->kids[0].name == "f.txt" && x->kids[0].data == "deep",
+                      "folders read to any depth (13 levels; CP/M's window stopped at 8)");
+                break;
+            }
+            x = next; ++depth;
+        }
+        const TransferItem *A = nullptr;
+        for (const TransferItem &k : it.value(0).kids) if (k.name == "A.txt") A = &k;
+        CHECK(A && A->data == "a" && A->hostPath == QFileInfo(h + "/A.txt").absoluteFilePath() && A->when == QFileInfo(h + "/A.txt").lastModified(),
+              "a file inside: its data, absolute host path and date");
+
+        it = readHost({tmp.path() + "/named-link", h + "/b.txt", h + "/c/"}, HostReadOptions(), &errors);
+        CHECK(errors.isEmpty() && it.size() == 3 && it[0].isDir && it[0].kids.size() == 1 && it[1].data == "b" && it[1].hostPath == h + "/b.txt" &&
+              it[2].name == "c", "paths given: a link named is followed; a file's host path as given; \"dir/\" is named after the folder");
+
+        // the per-file hook: before the size check and the read; may leave a file out or fill in its item
+        QStringList seen;
+        HostReadOptions o;
+        o.fileHook = [&](const QString &p, bool named, TransferItem *t) {
+            seen << QFileInfo(p).fileName() + (named ? "*" : "") + (t->data.isEmpty() ? "" : "+data");
+            if (p.endsWith(".inf")) return false;
+            if (t->name == "A.txt") { t->name = "RENAMED"; t->sourceFs = "adfs"; }
+            return true;
+        };
+        it = readHost({h + "/A.txt", h + "/a.inf", h}, o, &errors);
+        CHECK(it.size() == 2 && it[0].name == "RENAMED" && it[0].sourceFs == "adfs" && it[0].data == "a", "the hook fills in an item (and the file is read after it)");
+        bool infIn = false;
+        for (const TransferItem &k : it.value(1).kids) if (k.name.endsWith(".inf")) infIn = true;
+        CHECK(!infIn && seen.contains("a.inf*") && seen.contains("a.inf") && seen.contains("A.txt*") && !seen.join(" ").contains("+data"),
+              qPrintable("the hook leaves files out, named or inside, and is told which were named: " + seen.join(" ")));
+
+        // the size limit, checked before the file is read: a sparse file of 6 GB
+        const QString big = h + "/big/huge.bin";
+        QDir().mkpath(h + "/big");
+        { QFile f(big); f.open(QIODevice::WriteOnly); f.resize(qint64(6) * 1024 * 1024 * 1024); }
+        spit(h + "/big/small.bin", "s");
+        o = HostReadOptions();
+        o.sizeLimit = 16 * 1024 * 1024;
+        QElapsedTimer t;
+        t.start();
+        errors.clear();
+        it = readHost({h + "/big", big}, o, &errors);
+        CHECK(t.elapsed() < 5000 && errors.size() == 2 && errors[0].kind == HostReadError::TooLarge && errors[0].path == QFileInfo(big).absoluteFilePath() &&
+              !errors[0].named && errors[1].named && errors[1].path == big && it.size() == 1 && it[0].kids.size() == 1 && it[0].kids[0].name == "small.bin",
+              "a file over the limit is refused before it is read (6 GB sparse, at once), inside a folder and named; the rest is read");
+        QFile::remove(big);
+
+        // a missing path and a file that can't be read: listed, the rest read
+        errors.clear();
+        it = readHost({h + "/nothere.txt", h + "/b.txt"}, HostReadOptions(), &errors);
+        CHECK(errors.size() == 1 && errors[0].kind == HostReadError::NotFound && errors[0].path == h + "/nothere.txt" && !errors[0].reason.isEmpty() &&
+              it.size() == 1 && it[0].name == "b.txt", qPrintable("a missing path: not found, with the system's reason (" + errors.value(0).reason + "); the rest read"));
+#ifdef Q_OS_UNIX
+        {   // a socket can't be opened as a file, not even by root
+            const QString sock = tmp.path() + "/s.sock";
+            int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            sockaddr_un a{};
+            a.sun_family = AF_UNIX;
+            qstrncpy(a.sun_path, QFile::encodeName(sock).constData(), sizeof(a.sun_path));
+            const bool made = fd >= 0 && bind(fd, reinterpret_cast<sockaddr *>(&a), sizeof(a)) == 0;
+            errors.clear();
+            it = readHost({sock, h + "/b.txt"}, HostReadOptions(), &errors);
+            CHECK(made && errors.size() == 1 && errors[0].kind == HostReadError::CannotRead && errors[0].path == sock && !errors[0].reason.isEmpty() &&
+                  it.size() == 1, qPrintable("a file that can't be read: listed with the system's reason (" + errors.value(0).reason + "); the rest read"));
+            if (fd >= 0) ::close(fd);
+            QFile::remove(sock);
+            if (geteuid() != 0) {          // (root reads anything: only checked as another user)
+                spit(h + "/locked/no.txt", "no");
+                QFile::setPermissions(h + "/locked/no.txt", QFileDevice::Permissions());
+                errors.clear();
+                it = readHost({h + "/locked"}, HostReadOptions(), &errors);
+                CHECK(errors.size() == 1 && errors[0].kind == HostReadError::CannotRead && it.size() == 1 && it[0].kids.isEmpty(),
+                      "a file inside a folder that can't be read: listed, the folder still read");
+                QFile::setPermissions(h + "/locked/no.txt", QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+            }
+        }
+#endif
     }
 
     printf("== private MIME types\n");

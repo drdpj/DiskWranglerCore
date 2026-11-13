@@ -37,6 +37,7 @@ struct TransferItem {
     QDateTime when;                         // the source's date (invalid if none); local, no zone
     QMap<QString, QJsonObject> attrs;       // the document's "attributes", by family: "acorn", "fat", "cpm", later "flex"
     QString sourceFs;                       // the document's source filesystem: "adfs", "dfs", "fat", "cpm"; empty for a host file
+    QString hostPath;                       // the host file or folder it was read from (xfer::readHost); empty for anything else
     QVector<TransferItem> kids;
 };
 
