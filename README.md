@@ -16,14 +16,21 @@ optional filesystem modules, DFS (with `.inf` files) and FAT. Version 0.5 adds t
 console programs `acorndw` and `cpmdw` are built on (one invocation, one checked save; `--json`, `--dry-run`, a
 `script` command; see [docs/cli.md](docs/cli.md)), makes the transfer items and retro-files a module of their own
 that needs only QtCore, adds a clock that can be fixed for repeatable output (`SOURCE_DATE_EPOCH`), and gives
-`Volume` path parsing and display in each filesystem's own syntax. The design, and how each version changed it, is
-in [docs/design.md](docs/design.md).
+`Volume` path parsing and display in each filesystem's own syntax. Versions 0.6 to 0.13 (step 5) add the window kit
+both programs' main windows are built on (`DiscWindow`, `VolumePane`, the import session, Properties and Check as
+hooks, the open pipeline with Locate... for another program), the `Importer`, the one host-file reader and the
+new-disc presets registry. Version 0.14 ports the programs' tests to that API and drops what was kept for them;
+0.15 makes `Disc::transact` the only rollback (the filesystem classes keep no snapshot of their own). The design, and
+how each version changed it, is in [docs/design.md](docs/design.md).
+
+**Writing a program on the core:** [docs/guide.md](docs/guide.md) shows how the pieces fit and what a program
+writes itself.
 
 ## Using it
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v0.5.1
+    git -C core checkout v0.15.0
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you
@@ -61,12 +68,12 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 | `diskwrangler/xfer/` | a module of its own: `TransferItem`, the retro-files reader and writer with its `HostPolicy`, `hostSafeName`, the private MIME types, the `Importer` that the command line's `put` and `copy` and the windows' imports share (QtCore only) |
 | `diskwrangler/text/` | the file-viewer registry with the Plain and Hex viewers, and the text helpers (QtCore only) |
 | `diskwrangler/device/` | `Container` (the image file: raw, ImageDisk, DSK / extended DSK, TeleDisk; physical and stored-bytes views; staging; `commit` and `saveAs`), `Linear` (a disc as one run of bytes, through a `SideOrder`), `SafeSave` (temporary copy, check, `.bak`, atomic replace) (QtCore only) |
-| `diskwrangler/fs/` | `Volume`, `Path`, `Entry`, `AttrSpec`, `NameRules` (`volume.h`), `Disc` with its mounts, transactions and checked save (`disc.h`), detection by tiers: `Probe`, `Candidate`, `decide` (`detection.h`) (QtCore only) |
+| `diskwrangler/fs/` | `Volume`, `Path`, `Entry`, `AttrSpec`, `NameRules` (`volume.h`), `Disc` with its mounts, transactions and checked save (`disc.h`), detection by tiers: `Probe`, `Candidate`, `decide` (`detection.h`), the new-disc presets registry (`presets.h`) (QtCore only) |
 | `diskwrangler/fs/dfs/`, `fs/fat/` | the optional modules: Acorn DFS (Watford 62-file catalogues, `.inf` lines, addresses, directory letters copied to ADFS, Acorn Z80 CP/M's catalogue) and FAT12/16, each with its probe and its `Volume` adapter (QtCore only) |
 | `diskwrangler/cli/` | the command-line layer: `Backend`, `OpenedImage` and `runCli` (`cli.h`), the argument and script parser, the JSON output and exit codes, and the commands (QtCore only) |
 | `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
 | `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) |
-| `docs/` | the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
+| `docs/` | the guide to writing a program on the core (`guide.md`); the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
 | `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit and its import session on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
 
 ## Versions
