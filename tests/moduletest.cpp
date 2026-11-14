@@ -51,6 +51,61 @@ static fs::Verdict probeFile(const QString &path, int force = -1) {
     return fs::detect(ctx, {&fp, &dp});
 }
 
+// Step 6b: a DFS side's catalogue as kept in memory, as text (every field the next catalogue write uses).
+static QString describe(const dfs::Disc &d) {
+    QStringList o;
+    o << QString("title '%1' boot %2 sectors %3 watford %4 max %5").arg(d.title()).arg(d.bootOption()).arg(d.sectors())
+             .arg(d.watford()).arg(d.maxFiles());
+    for (const dfs::File &f : d.files())
+        o << QString("%1 %2 %3 %4 %5 %6 %7").arg(f.fullName()).arg(f.locked).arg(f.load, 0, 16).arg(f.exec, 0, 16).arg(f.length)
+                 .arg(f.start).arg(f.cat);
+    return o.join('\n');
+}
+
+// Is what a change left in memory exactly what reload() reads from the staging? The catalogue as listed, and the bytes
+// the next catalogue write makes from it (a boot-option write: it writes the title, the cycle numbers, the size and
+// every entry from memory). Both copies are written, compared and put back; d itself is not changed.
+static bool dfsFaithful(const dfs::Disc &d, device::Container &c, device::Linear &lin, QString *why) {
+    const device::Container::Snapshot snap = c.snapshot();
+    dfs::Disc mem = d, fresh = d;
+    QString e;
+    if (!fresh.reload(&e)) { *why = "reload: " + e; return false; }
+    if (describe(mem) != describe(fresh)) { *why = "in memory:\n" + describe(mem) + "\nreloaded:\n" + describe(fresh); return false; }
+    QByteArray a, b;
+    const bool wa = mem.setBootOption(mem.bootOption(), &e) && lin.read(0, 4 * 256, &a, &e);
+    c.restore(snap);
+    const bool wb = fresh.setBootOption(fresh.bootOption(), &e) && lin.read(0, 4 * 256, &b, &e);
+    c.restore(snap);
+    if (!wa || !wb || a != b) { *why = "the next catalogue write differs" + (e.isEmpty() ? QString() : ": " + e); return false; }
+    return true;
+}
+
+// The same for a FAT volume: its FAT and label in memory against reload(), and the bytes the next FAT and label write
+// makes (a label write writes the label entry and every copy of the FAT from memory).
+static bool fatFaithful(const fat::Volume &v, device::Container &c, device::Linear &lin, quint32 bytes, QString *why) {
+    const device::Container::Snapshot snap = c.snapshot();
+    fat::Volume mem = v, fresh = v;
+    QString e;
+    if (!fresh.reload(&e)) { *why = "reload: " + e; return false; }
+    if (mem.label() != fresh.label() || mem.freeClusters() != fresh.freeClusters()) {
+        *why = QString("label '%1' / '%2', free %3 / %4").arg(mem.label(), fresh.label()).arg(mem.freeClusters()).arg(fresh.freeClusters());
+        return false;
+    }
+    QByteArray a, b;
+    const bool wa = mem.setLabel(mem.label(), &e) && lin.read(0, bytes, &a, &e);
+    c.restore(snap);
+    const bool wb = fresh.setLabel(fresh.label(), &e) && lin.read(0, bytes, &b, &e);
+    c.restore(snap);
+    if (!wa || !wb || a != b) { *why = "the next FAT and label write differs" + (e.isEmpty() ? QString() : ": " + e); return false; }
+    return true;
+}
+
+static QByteArray pattern(int n, int seed) {
+    QByteArray b(n, 0);
+    for (int i = 0; i < n; ++i) b[i] = char((i * 31 + seed * 7) & 0xFF);
+    return b;
+}
+
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir tmp;
@@ -263,6 +318,127 @@ int main(int argc, char **argv) {
         fat::Found f = std::any_cast<fat::Found>(v.bestCandidate()->data);
         CHECK(v.bestCandidate()->description == "Acorn DOS Plus 800K floppy" && f.acorn800 && f.fromTable && f.sides.doubleSided() &&
                   !f.sides.sequential && !f.sidesConfirmed, "Acorn 800K, blank: interleaved, not confirmed");
+    }
+
+    // Step 6b: the DFS and FAT classes keep no snapshot of their own. A change that fails half way leaves what it did;
+    // Disc::transact puts the staging back and has the volume reload, and reload() gives exactly what the changes left
+    // in memory.
+    for (const bool watford : {false, true}) {
+        printf("Step 6b: a %s DFS disc: Disc::transact is the only rollback, and reload() is faithful\n", watford ? "Watford 62-file" : "31-file");
+        QByteArray img(800 * 256, 0);
+        img.replace(0, 512, catalogue(800, "STAGING"));
+        if (watford) {
+            QByteArray c2 = catalogue(800, "");
+            for (int i = 0; i < 8; ++i) c2[i] = char(0xAA);
+            img.replace(512, 512, c2);
+        }
+        const QString path = d + (watford ? "/w6b.ssd" : "/a6b.ssd");
+        spit(path, img);
+        device::Container c;
+        CHECK(c.open(path, &err), "open: " + err);
+        device::Linear lin(&c);
+        auto disc = std::make_shared<dfs::Disc>();
+        dfs::Layout lay;
+        lay.sectorsPerSide = 800;
+        CHECK(disc->attach(&lin, quint64(img.size()), 0, lay, &err) && disc->watford() == watford, "attach: " + err);
+        auto vol = std::make_shared<dfs::Volume>(disc);
+        fs::Disc fd(&c);
+        fd.addMount({"drive 0", vol});
+        QString why;
+        const int many = watford ? 40 : 20;
+        bool added = true;
+        for (int i = 0; i < many && added; ++i)
+            added = disc->addFile(i % 3 ? '$' : 'A', QString("F%1").arg(i), pattern(100 + 300 * (i % 4), i), 0x1900 + i, 0x8023, i % 5 == 0, false, &err);
+        CHECK(added, QString("%1 files added: ").arg(many) + err);
+        CHECK(dfsFaithful(*disc, c, lin, &why), "reload() after the adds: " + why);
+        CHECK(disc->addFile('$', "EMPTY", QByteArray(), 0, 0, false, false, &err) && dfsFaithful(*disc, c, lin, &why), "an empty file: " + err + why);
+        CHECK(disc->addFile('$', "F1", pattern(2000, 99), 0x3000, 0x3000, false, true, &err) && dfsFaithful(*disc, c, lin, &why),
+              "a replace with a larger file: " + err + why);
+        CHECK(disc->remove('$', "F2", &err) && disc->remove('A', "F3", &err) && dfsFaithful(*disc, c, lin, &why), "removes: " + err + why);
+        CHECK(disc->modify('$', "F4", 'B', "MOVED", true, 0xFFFF1900, 0x8023, &err) && dfsFaithful(*disc, c, lin, &why),
+              "a rename into another letter, locked: " + err + why);
+        CHECK(disc->setTitle("NEW TITLE", &err) && disc->setBootOption(3, &err) && dfsFaithful(*disc, c, lin, &why), "title and boot option: " + err + why);
+        if (watford) CHECK(disc->addFile('$', "LATE", pattern(700, 7), 0, 0, false, false, &err) && dfsFaithful(*disc, c, lin, &why),
+                           "a file in the second catalogue's range: " + err + why);
+        // a replace that doesn't fit: the old file is taken out of the catalogue in memory, then there is no room
+        const device::Container::Snapshot snap = c.snapshot();
+        const QString before = describe(*disc);
+        const QByteArray f1 = pattern(2000, 99), huge(int(disc->freeSectors() + 40) * 256, 'h');
+        CHECK(!fd.transact([&](QString *x) { return vol->write(fs::Path(), "$.F1", huge, {}, QDateTime(), true, x); }, &err),
+              "a replace that doesn't fit fails: " + err);
+        QByteArray back;
+        CHECK(c.snapshot() == snap && describe(*disc) == before && vol->read(fs::Path({"$.F1"}), &back, &err) && back == f1,
+              "the transaction put back the staging and the catalogue: $.F1 is there as it was");
+        QString e2;
+        CHECK(!disc->addFile('$', "F1", huge, 0, 0, false, true, &e2) && disc->indexOf('$', "F1") < 0,
+              "without a transaction the catalogue in memory has lost $.F1 (" + e2 + ")");
+        CHECK(disc->reload(&err) && describe(*disc) == before && c.snapshot() == snap, "reload() gives it back: " + err);
+        // several changes, the last one failing (Delete and Properties make several in one transaction)
+        CHECK(!fd.transact([&](QString *x) {
+                  return vol->remove(fs::Path({"$.F5"}), x) && vol->write(fs::Path(), "$.NEW", "new", {}, QDateTime(), false, x) &&
+                         vol->setVolumeAttrs({{"title", "CHANGED"}}, x) && vol->rename(fs::Path({"$.NOSUCH"}), fs::Path({"$.X"}), x);
+              }, &err) && c.snapshot() == snap && describe(*disc) == before, "a remove, a write, a title, then a failure: all put back: " + err);
+        CHECK(disc->check().ok() && fd.commit(device::Container::SaveOptions(), &err), "checked and saved: " + err);
+        device::Container c2;
+        c2.open(path, &err);
+        device::Linear l2(&c2);
+        dfs::Disc d2;
+        CHECK(d2.attach(&l2, quint64(img.size()), 0, lay, &err) && describe(d2) == before, "read back as it was in memory");
+    }
+
+    printf("Step 6b: a FAT floppy: Disc::transact is the only rollback, and reload() is faithful\n");
+    {
+        QByteArray img(737280, 0);
+        const unsigned char bpb[] = {0xEB, 0x3C, 0x90, 'M', 'S', 'D', 'O', 'S', '5', '.', '0', 0x00, 0x02, 2, 1, 0, 2, 112, 0,
+                                     0xA0, 0x05, 0xF9, 3, 0, 9, 0, 2, 0};
+        img.replace(0, int(sizeof(bpb)), QByteArray(reinterpret_cast<const char *>(bpb), int(sizeof(bpb))));
+        img[510] = char(0x55); img[511] = char(0xAA);
+        for (int fat : {1, 4}) { img[fat * 512] = char(0xF9); img[fat * 512 + 1] = char(0xFF); img[fat * 512 + 2] = char(0xFF); }
+        const QString path = d + "/f6b.img";
+        spit(path, img);
+        device::Container c;
+        CHECK(c.open(path, &err), "open: " + err);
+        device::Linear lin(&c);
+        auto fv = std::make_shared<fat::Volume>();
+        CHECK(fv->attach(&lin, 0, 737280, &err), "attach: " + err);
+        auto vol = std::make_shared<fat::FsVolume>(fv);
+        fs::Disc fd(&c);
+        fd.addMount({"DOS", vol});
+        QString why;
+        quint32 sub = 0, deep = 0;
+        CHECK(fv->addFile(0, "ONE.TXT", pattern(5000, 1), false, &err) && fv->makeDir(0, "SUB", &err, &sub) &&
+                  fv->makeDir(sub, "DEEP", &err, &deep) && fatFaithful(*fv, c, lin, 737280, &why), "adds and directories: " + err + why);
+        bool added = true;
+        for (int i = 0; i < 40 && added; ++i) added = fv->addFile(sub, QString("F%1.DAT").arg(i), pattern(700 + 100 * i, i), false, &err);
+        CHECK(added && fatFaithful(*fv, c, lin, 737280, &why), "40 files: the directory grows: " + err + why);
+        CHECK(fv->addFile(0, "ONE.TXT", pattern(20000, 2), true, &err) && fatFaithful(*fv, c, lin, 737280, &why), "a replace: " + err + why);
+        CHECK(fv->modify(sub, "F3.DAT", "RENAMED.DAT", fat::AttrR | fat::AttrH, &err) && fv->remove(sub, "F4.DAT", &err) &&
+                  fatFaithful(*fv, c, lin, 737280, &why), "a rename with attributes, a remove: " + err + why);
+        CHECK(fv->setLabel("beeb disk", &err) && fatFaithful(*fv, c, lin, 737280, &why), "a label: " + err + why);
+        CHECK(fv->remove(0, "SUB", &err) && fatFaithful(*fv, c, lin, 737280, &why), "a directory removed with its files: " + err + why);
+        // a replace that doesn't fit: the old file's clusters are freed in memory, then there is no room
+        const device::Container::Snapshot snap = c.snapshot();
+        const quint32 freeBefore = fv->freeClusters();
+        const QByteArray one = pattern(20000, 2), huge(int(quint64(freeBefore + 50) * fv->clusterBytes()), 'h');
+        CHECK(!fd.transact([&](QString *x) { return vol->write(fs::Path(), "ONE.TXT", huge, {}, QDateTime(), true, x); }, &err),
+              "a replace that doesn't fit fails: " + err);
+        QByteArray back;
+        CHECK(c.snapshot() == snap && fv->freeClusters() == freeBefore && vol->read(fs::Path({"ONE.TXT"}), &back, &err) && back == one,
+              "the transaction put back the staging and the FAT: ONE.TXT is there as it was");
+        QString e2;
+        CHECK(!fv->addFile(0, "ONE.TXT", huge, true, &e2) && fv->freeClusters() != freeBefore,
+              "without a transaction the FAT in memory has ONE.TXT's clusters freed (" + e2 + ")");
+        CHECK(fv->reload(&err) && fv->freeClusters() == freeBefore && c.snapshot() == snap && fatFaithful(*fv, c, lin, 737280, &why),
+              "reload() gives it back: " + err + why);
+        // a full root directory: a new directory's cluster is taken and written before there turns out to be no entry for it
+        int n = 0;
+        while (n < 200 && fv->addFile(0, QString("R%1").arg(n), QByteArray(), false, &e2)) ++n;
+        CHECK(n > 0 && fv->rootEntries() == 112, QString("the root directory filled with %1 more entries (%2)").arg(n).arg(e2));
+        const device::Container::Snapshot full = c.snapshot();
+        const quint32 freeFull = fv->freeClusters();
+        CHECK(!fd.transact([&](QString *x) { return vol->mkdir(fs::Path(), "NEWDIR", x); }, &err) && c.snapshot() == full &&
+                  fv->freeClusters() == freeFull, "a directory in a full root: refused, its cluster put back: " + err);
+        CHECK(fv->check().ok() && fd.commit(device::Container::SaveOptions(), &err), "checked and saved: " + err);
     }
 
     printf("New-disc presets: the registry and the module presets (step 5m)\n");

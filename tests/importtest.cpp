@@ -228,6 +228,40 @@ int main(int argc, char **argv) {
         CHECK(!e.ok && e.err.kind == ImportError::Failed && e.err.message == "a directory called /SUB is in the way", "a file over a directory: " + e.err.message);
     }
 
+    printf("Step 6b: the item guard covers the directories a run makes\n");
+    {
+        // A full root directory: a new directory's cluster is taken and written before there turns out to be no entry
+        // for it. The FAT class no longer puts that back itself; the window's guard (Disc::transact) must.
+        auto f = makeFat(d);
+        fs::Volume *v = f->v();
+        int n = 0;
+        QString e;
+        while (n < 200 && v->write(fs::Path(), QString("R%1").arg(n), QByteArray(), {}, QDateTime(), false, &e)) ++n;
+        CHECK(n == 112, QString("the root directory filled: %1 files (%2)").arg(n).arg(e));
+        const device::Container::Snapshot before = f->c.snapshot();
+        const qint64 freeBefore = v->info().free;
+        auto guarded = [&](const QVector<TransferItem> &items, const fs::Path &dir) {
+            Run run;
+            Importer imp(v, "vol", ImportOptions());
+            imp.setOnError(OnError::Continue);
+            imp.setConflictCallback([](const fs::Path &, const fs::Entry &, const TransferItem &) { return Conflict::Skip; });
+            imp.setItemGuard([&](const std::function<bool(QString *)> &change, QString *x) { return f->disc->transact(change, x); });
+            run.ok = imp.import(items, names(items), dir, &run.r, &run.err);
+            return run;
+        };
+        Run a = guarded({folder("SUB", {file("IN.TXT", "in")})}, fs::Path());
+        CHECK(a.r.errors.size() == 1 && a.r.errors[0].cause == ImportError::MakeDir && a.r.dirs == 0 && f->c.snapshot() == before &&
+                  v->info().free == freeBefore, "a folder in a full root: one error, nothing of it left: " +
+                  (a.r.errors.isEmpty() ? QString("no error") : a.r.errors[0].message));
+        Run b = guarded({file("IN.TXT", "in")}, fs::Path({"MADE"}));
+        CHECK(b.r.errors.size() == 1 && b.r.errors[0].cause == ImportError::MakeDir && b.r.added == 0 && f->c.snapshot() == before &&
+                  v->info().free == freeBefore, "the run's own directory can't be made: one error, nothing left: " +
+                  (b.r.errors.isEmpty() ? QString("no error") : b.r.errors[0].message));
+        Run c = runGui(v, {folder("SUB", {file("IN.TXT", "in")})}, {});
+        CHECK(c.r.errors.size() == 1 && !(f->c.snapshot() == before) && v->info().free < freeBefore,
+              "without a guard the directory's cluster stays taken (the classes keep no snapshot since step 6b)");
+    }
+
     printf("A conflict callback: Replace, Skip, and the \"all\" answers remembered\n");
     {
         auto f = makeDfs(d);
