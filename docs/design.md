@@ -787,7 +787,8 @@ section, this section is what was built.
 ## Amendments from step 6
 
 Step 6 removes what step 5 left standing so that the programs could keep their tests: it ports the tests to the new
-API and deletes the shims. Series 6a is core v0.14.0.
+API and deletes the shims (series 6a, core v0.14.0), then takes each filesystem class's own staging out (series 6b,
+core v0.15.0).
 
 1. **`FileOpen::FileOpenFilter<Window>`** (`diskwrangler/app/fileopen.h`) asked its window for `windows()`, `image()` and
    `openImage()` - three of the shims step 5 meant to delete - so the template, not the programs, was what kept them
@@ -798,3 +799,36 @@ API and deletes the shims. Series 6a is core v0.14.0.
    `clitest`'s test backend, which now calls `dw::xfer::readHost` and `cli::hostReadFailed` itself, as `cpmdw` and
    `acorndw` do.
 3. **`DW_CORE_VERSION`** is 0.14.0 (`clitest` expects it).
+
+Series 6b (v0.15.0): the risk "Staging and caches" in the sense check above, and plan item 6's "remove each
+filesystem class's own staging".
+
+4. **`Disc::transact` is the only rollback.** Before 6b every filesystem class took a snapshot of the container's
+   staging (and of its own state) around each change and put it back on failure: `DFS_TXN` in `dw::dfs::Disc`,
+   `DOS_TXN` in `dw::fat::Volume`, and in the programs `Adfs::Image::snapshot()` / `restore()` with the wrappers
+   round each ADFS change, and `TXN_BEGIN` in `Cpm::Volume` and `Torch::Fs`. All of it is gone. A change that fails now
+   stops where it is, leaving what it staged and what it changed in memory (a free space map, a catalogue, a FAT); the
+   caller's `Disc::transact` puts the staging back and has every mount reload. The classes keep only the refusal of a
+   read-only disc (`canWrite`). The programs already made every change inside a transaction (the window kit, the import
+   session, each window's own New directory and Rename), and the command line needs none: its first error abandons
+   the run unsaved (`Disc::revert`). One gap was found and closed: **the `Importer`'s directories** (`ensureDir` and
+   a folder item's `mkdir`) were made outside the item guard, so a directory that failed half way (a FAT root
+   directory found full after the new directory's cluster was written) relied on the class's own snapshot. The guard
+   now runs each directory the run makes as well (`importer.h`, `ItemGuard`).
+5. **`reload()` must be faithful**, and is tested: after any change that succeeded, it gives exactly the state the
+   change left in memory, since that is what a later failed transaction falls back to (`volume.h`). Every class
+   already had one (`Disc::reload` and `Volume::reload` in the modules and `Adfs::Image::reload` since step 4; CP/M's
+   and Torch's parse the directory after every change anyway). `moduletest` checks the DFS (31-file and Watford
+   62-file) and FAT classes, the programs' `voltest` the ADFS, CP/M, CP/M 3 and Torch CP/N ones: after each kind of
+   change the state in memory is compared with a reload of the same staging, and so are the bytes the next write
+   makes from each. **One unfaithful case, left as it is:** a DFS title with leading or trailing spaces is kept as given
+   by `setTitle` but read back trimmed (`load`, as `attach` and `check()` always did), so after any reload the next
+   catalogue write pads it with zeros instead of spaces. Changing either side would change saved bytes; the windows
+   trim the title before setting it, so only `acorndw title` with spaces can reach it, and a run never reloads between
+   its changes.
+6. **The contract, stated where the classes are:** `volume.h` (changes, `reload`), `disc.h`, and each class's header
+   (`dfs.h`, `fat.h`, Acorn's `adfs.h`, CP/M's `cpmfs.h` and `cpmstore.h`): a change made outside a transaction may
+   leave part of itself behind. The tests that call the classes directly are unchanged; the new checks show both
+   sides (through a transaction, nothing is left; without one, the half-done change stays until the staging is put
+   back and the class reloads).
+7. **`DW_CORE_VERSION`** is 0.15.0 (`clitest` expects it).
