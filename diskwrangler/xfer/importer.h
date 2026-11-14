@@ -143,8 +143,10 @@ typedef std::function<fs::Placement(const TransferItem &item, const fs::Path &ta
 // The attributes a file is written with. replacing: the file it replaces (unlocked first, if it was locked), or null.
 // Default: Volume::fromRetro, and a plain item replacing a file keeps that file's attributes (locked apart).
 typedef std::function<fs::AttrValues(const TransferItem &item, const fs::Entry *replacing)> AttrsHook;
-// Runs one file's changes (unlocking the file it replaces, then writing it) so that a failure leaves nothing of that
-// file behind: a window passes Disc::transact. Without one the changes are made as they come.
+// Runs one file's changes (unlocking the file it replaces, then writing it), and each directory the run makes, so that
+// a failure leaves nothing of that file or directory behind: a window passes Disc::transact. Without one the changes
+// are made as they come (the command line: its first error abandons the run). Since step 6b the transaction is the only
+// rollback: the filesystem classes keep no snapshot of their own.
 typedef std::function<bool(const std::function<bool(QString *)> &change, QString *err)> ItemGuard;
 // Told of each error as it is recorded (onError = Continue), so a program can keep its own list in the order things
 // happened (step 5l: the Acorn window lists its DFS-letter warnings among the errors).
@@ -176,6 +178,7 @@ private:
     bool fail(ImportResult *r, ImportError::Kind kind, const QString &msg, const QString &path, const QString &from,
               const QString &why = QString(), ImportError::Cause cause = ImportError::Other, const QString &name = QString());
     bool exists(const fs::Path &p, fs::Entry *e) const;
+    bool guarded(const std::function<bool(QString *)> &change, QString *err) const { return m_guard ? m_guard(change, err) : change(err); }
     QString madeKey(const fs::Path &dir, const QString &name) const;
     QString uniqueName(const fs::Path &dir, const QString &name, NodeKind kind) const;
 

@@ -131,7 +131,7 @@ bool Importer::ensureDir(const fs::Path &dir, ImportResult *r, ImportError *e) {
             }
         } else {
             QString why;
-            if (!m_v->mkdir(cur, part, &why)) {
+            if (!guarded([&](QString *x) { return m_v->mkdir(cur, part, x); }, &why)) {
                 *e = makeError(ImportError::Failed, QString("%1: %2").arg(m_v->displayPath(next), why), m_v->displayPath(next));
                 e->cause = ImportError::MakeDir;          // (why stays the whole message, as it always was)
                 e->name = part;
@@ -229,7 +229,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
             return fail(r, ImportError::Failed, QString("a file called %1 is in the way").arg(shown), shown, from, QString(), ImportError::FileInTheWay, name);
         if (!there) {
             QString why;
-            if (!m_v->mkdir(p.dir, name, &why))
+            if (!guarded([&](QString *x) { return m_v->mkdir(p.dir, name, x); }, &why))
                 return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why, ImportError::MakeDir, name);
             ++r->dirs;
             Change c; c.op = "mkdir"; c.vol = m_label; c.path = shown; c.from = from; c.note = p.warning;
@@ -296,7 +296,7 @@ bool Importer::importOne(const TransferItem &itIn, const QString &from, const fs
         const QDateTime when = it.when.isValid() ? it.when : dw::now();
         return m_v->write(p.dir, name, it.data, attrs, when, replace, e);
     };
-    const bool done = m_guard ? m_guard(change, &why) : change(&why);
+    const bool done = guarded(change, &why);
     if (!done) return fail(r, ImportError::Failed, QString("%1: %2").arg(shown, why), shown, from, why, ImportError::Write, name);
     m_made.insert(madeKey(p.dir, name));
     if (replace) ++r->replaced; else ++r->added;
