@@ -160,7 +160,9 @@ public:
     virtual bool read(const Path &file, QByteArray *out, QString *err) const = 0;
 
     // Changes. A Disc wraps each in a transaction: on failure the container is restored and reload() called, so a
-    // volume needs no rollback code of its own (the adapters' classes still have theirs).
+    // volume needs no rollback code of its own, and since step 6b none has any (nor have the classes the adapters
+    // wrap). A change that fails may therefore leave part of itself staged: never make one outside Disc::transact,
+    // unless a failure abandons everything anyway (the command line's run, a new disc being made).
     virtual bool write(const Path &dir, const QString &name, const QByteArray &data, const AttrValues &attrs,
                        const QDateTime &when, bool replace, QString *err) = 0;
     virtual bool mkdir(const Path &dir, const QString &name, QString *err);       // default: no directories
@@ -170,7 +172,10 @@ public:
     virtual bool setVolumeAttrs(const AttrValues &a, QString *err);                // default: none
 
     virtual Report check() const = 0;         // also what vetoes a save
-    virtual bool reload(QString *err) = 0;    // read everything cached again from the (staged) disc
+    // Read everything cached again from the (staged) disc. It must be faithful: after any change that succeeded,
+    // reload() gives exactly the state the change left in memory, as that is what a later failed transaction falls
+    // back to.
+    virtual bool reload(QString *err) = 0;
 
     // retro-files. toRetro: an entry's attributes as the document's families; fromRetro: the attributes to give an
     // incoming item. By default each AttrSpec with a retroFamily maps its value straight to retroKey (booleans as

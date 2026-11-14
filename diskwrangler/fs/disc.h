@@ -22,6 +22,7 @@
 //
 // Every change to any volume is staged in the container, so a transaction is simply: take the container's
 // snapshot, run the change, and if it fails put the snapshot back and have every volume reload what it caches.
+// It is the only rollback there is: the filesystem classes keep no snapshot of their own (step 6b).
 
 #include <QString>
 #include <QVector>

@@ -141,6 +141,9 @@ public:
     int indexOf(QChar dir, const QString &name) const;
 
     bool readFile(const File &f, QByteArray *out, QString *err) const;
+    // Changes, staged in the container. One that fails may leave part of itself staged and the catalogue in memory
+    // changed: make changes inside dw::fs::Disc::transact, which puts the staging back and calls reload() (since step
+    // 6b the class keeps no snapshot of its own).
     bool addFile(QChar dir, const QString &name, const QByteArray &data, quint32 load, quint32 exec,
                  bool locked, bool replace, QString *err);
     bool remove(QChar dir, const QString &name, QString *err);
@@ -157,6 +160,7 @@ private:
     bool wr(quint32 n, const QByteArray &data, QString *err);
     bool load(QString *err);
     bool writeCatalogue(QString *err);
+    bool canWrite(QString *err) const;                          // false ("image is read-only") on a read-only disc
     void placeWatford(int idx);                                 // choose the catalogue of a new file (m_files[idx])
     quint32 firstData() const { return m_watford ? 4 : 2; }    // the first sector after the catalogue(s)
     bool findGap(quint32 n, quint32 *start) const;

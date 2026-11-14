@@ -417,19 +417,17 @@ bool Disc::readFile(const File &f, QByteArray *out, QString *err) const {
 
 // ---------------------------------------------------------------- mutations
 
-#define DFS_TXN(call)                                                          \
-    do {                                                                       \
-        if (!m_lin || !m_lin->writable()) { *err = "image is read-only"; return false; } \
-        dw::device::Container::Snapshot snap = m_lin->container()->snapshot();  \
-        Disc before = *this;                                                   \
-        bool ok = (call);                                                      \
-        if (!ok) { m_lin->container()->restore(snap); *this = before; return false; } \
-        return true;                                                           \
-    } while (0)
+// A change that fails stops where it is: what it has staged, and the catalogue it has changed in memory, are put back
+// by the caller's dw::fs::Disc::transact, which puts the staging back and has the volume reload (step 6b: the class
+// keeps no snapshot of its own). Only the refusal of a read-only disc is here.
+bool Disc::canWrite(QString *err) const {
+    if (!m_lin || !m_lin->writable()) { *err = "image is read-only"; return false; }
+    return true;
+}
 
 bool Disc::addFile(QChar dir, const QString &name, const QByteArray &data, quint32 load, quint32 exec, bool locked,
                    bool replace, QString *err) {
-    DFS_TXN(addInner(dir, name, data, load, exec, locked, replace, err));
+    return canWrite(err) && addInner(dir, name, data, load, exec, locked, replace, err);
 }
 
 bool Disc::addInner(QChar dir, const QString &name, const QByteArray &data, quint32 load, quint32 exec, bool locked,
@@ -474,47 +472,43 @@ bool Disc::addInner(QChar dir, const QString &name, const QByteArray &data, quin
 }
 
 bool Disc::remove(QChar dir, const QString &name, QString *err) {
-    DFS_TXN([&]() -> bool {
-        int idx = indexOf(dir, name);
-        if (idx < 0) { *err = QString("'%1.%2' not found").arg(dir, name); return false; }
-        m_files.removeAt(idx);
-        return writeCatalogue(err);
-    }());
+    if (!canWrite(err)) return false;
+    int idx = indexOf(dir, name);
+    if (idx < 0) { *err = QString("'%1.%2' not found").arg(dir, name); return false; }
+    m_files.removeAt(idx);
+    return writeCatalogue(err);
 }
 
 bool Disc::modify(QChar oldDir, const QString &oldName, QChar newDir, const QString &newName, bool locked,
                   quint32 load, quint32 exec, QString *err) {
-    DFS_TXN([&]() -> bool {
-        int idx = indexOf(oldDir, oldName);
-        if (idx < 0) { *err = QString("'%1.%2' not found").arg(oldDir, oldName); return false; }
-        QString why;
-        if (!validName(newName, &why)) { *err = QString("'%1': %2").arg(newName, why); return false; }
-        if (!validDir(newDir)) { *err = QString("'%1' is not a valid DFS directory character").arg(newDir); return false; }
-        int clash = indexOf(newDir, newName);
-        if (clash >= 0 && clash != idx) { *err = QString("'%1.%2' already exists").arg(newDir, newName); return false; }
-        File &f = m_files[idx];
-        f.name = newName; f.dir = newDir; f.locked = locked;
-        f.load = load & 0x3FFFF; f.exec = exec & 0x3FFFF;
-        return writeCatalogue(err);
-    }());
+    if (!canWrite(err)) return false;
+    int idx = indexOf(oldDir, oldName);
+    if (idx < 0) { *err = QString("'%1.%2' not found").arg(oldDir, oldName); return false; }
+    QString why;
+    if (!validName(newName, &why)) { *err = QString("'%1': %2").arg(newName, why); return false; }
+    if (!validDir(newDir)) { *err = QString("'%1' is not a valid DFS directory character").arg(newDir); return false; }
+    int clash = indexOf(newDir, newName);
+    if (clash >= 0 && clash != idx) { *err = QString("'%1.%2' already exists").arg(newDir, newName); return false; }
+    File &f = m_files[idx];
+    f.name = newName; f.dir = newDir; f.locked = locked;
+    f.load = load & 0x3FFFF; f.exec = exec & 0x3FFFF;
+    return writeCatalogue(err);
 }
 
 bool Disc::setTitle(const QString &title, QString *err) {
-    DFS_TXN([&]() -> bool {
-        if (title.size() > MaxTitle) { *err = "the DFS disc title can be at most 12 characters"; return false; }
-        for (QChar c : title)
-            if (c.unicode() < 0x20 || c.unicode() > 0x7E) { *err = "the title may only contain printable ASCII characters"; return false; }
-        m_title = title;
-        return writeCatalogue(err);
-    }());
+    if (!canWrite(err)) return false;
+    if (title.size() > MaxTitle) { *err = "the DFS disc title can be at most 12 characters"; return false; }
+    for (QChar c : title)
+        if (c.unicode() < 0x20 || c.unicode() > 0x7E) { *err = "the title may only contain printable ASCII characters"; return false; }
+    m_title = title;
+    return writeCatalogue(err);
 }
 
 bool Disc::setBootOption(int opt, QString *err) {
-    DFS_TXN([&]() -> bool {
-        if (opt < 0 || opt > 3) { *err = "the boot option must be 0 (off), 1 (*LOAD), 2 (*RUN) or 3 (*EXEC)"; return false; }
-        m_boot = opt;
-        return writeCatalogue(err);
-    }());
+    if (!canWrite(err)) return false;
+    if (opt < 0 || opt > 3) { *err = "the boot option must be 0 (off), 1 (*LOAD), 2 (*RUN) or 3 (*EXEC)"; return false; }
+    m_boot = opt;
+    return writeCatalogue(err);
 }
 
 // -------------------------------------------------------------------- check

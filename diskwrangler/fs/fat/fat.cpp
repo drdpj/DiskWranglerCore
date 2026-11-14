@@ -394,27 +394,26 @@ bool Volume::freeSlot(quint32 dir, QVector<Region> &rg, QByteArray &data, int *i
 
 // --------------------------------------------------------------- mutations
 
-#define DOS_TXN(call)                                                         \
-    do {                                                                      \
-        if (!m_lin || !m_lin->writable()) { *err = "image is read-only"; return false; } \
-        dw::device::Container::Snapshot snap = m_lin->container()->snapshot(); \
-        bool ok = (call);                                                     \
-        if (!ok) { m_lin->container()->restore(snap); QString e2; loadFat(&e2); return false; } \
-        return true;                                                          \
-    } while (0)
+// A change that fails stops where it is: what it has staged, and the FAT it has changed in memory, are put back by
+// the caller's dw::fs::Disc::transact, which puts the staging back and has the volume reload (step 6b: the class keeps
+// no snapshot of its own). Only the refusal of a read-only volume is here.
+bool Volume::canWrite(QString *err) const {
+    if (!m_lin || !m_lin->writable()) { *err = "image is read-only"; return false; }
+    return true;
+}
 
 bool Volume::addFile(quint32 dir, const QString &name, const QByteArray &data, bool replace, QString *err) {
-    DOS_TXN(addFileInner(dir, name, data, replace, err));
+    return canWrite(err) && addFileInner(dir, name, data, replace, err);
 }
 bool Volume::makeDir(quint32 dir, const QString &name, QString *err, quint32 *nc) {
-    DOS_TXN(makeDirInner(dir, name, err, nc));
+    return canWrite(err) && makeDirInner(dir, name, err, nc);
 }
-bool Volume::remove(quint32 dir, const QString &name, QString *err) { DOS_TXN(removeInner(dir, name, err)); }
+bool Volume::remove(quint32 dir, const QString &name, QString *err) { return canWrite(err) && removeInner(dir, name, err); }
 bool Volume::modify(quint32 dir, const QString &o, const QString &n, quint8 attr, QString *err) {
-    DOS_TXN(modifyInner(dir, o, n, attr, err));
+    return canWrite(err) && modifyInner(dir, o, n, attr, err);
 }
 
-bool Volume::setLabel(const QString &label, QString *err) { DOS_TXN(setLabelInner(label, err)); }
+bool Volume::setLabel(const QString &label, QString *err) { return canWrite(err) && setLabelInner(label, err); }
 
 bool Volume::setLabelInner(const QString &label, QString *err) {
     QString L = label.toUpper().trimmed();

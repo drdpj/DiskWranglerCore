@@ -103,6 +103,9 @@ public:
     bool listDir(quint32 dirCluster, QVector<DEntry> *out, QString *err) const;
     bool readFile(const DEntry &e, QByteArray *out, QString *err) const;
 
+    // Changes, staged in the container. One that fails may leave part of itself staged and the FAT in memory changed:
+    // make changes inside dw::fs::Disc::transact, which puts the staging back and calls reload() (since step 6b the
+    // class keeps no snapshot of its own).
     bool addFile(quint32 dirCluster, const QString &name, const QByteArray &data, bool replace, QString *err);
     bool makeDir(quint32 dirCluster, const QString &name, QString *err, quint32 *newCluster = nullptr);
     bool remove(quint32 dirCluster, const QString &name, QString *err);          // recursive for directories
@@ -126,6 +129,7 @@ private:
     bool loadFat(QString *err);
     void loadLabel();
     bool flushFat(QString *err);
+    bool canWrite(QString *err) const;          // false ("image is read-only") on a read-only volume
     quint32 fatGet(quint32 c) const;
     void fatSet(quint32 c, quint32 v);
     bool isEoc(quint32 v) const { return v >= (m_fat16 ? 0xFFF8u : 0xFF8u); }
