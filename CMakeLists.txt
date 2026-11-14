@@ -120,6 +120,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/handoffdialog.cpp
     diskwrangler/ui/importsession.cpp
     diskwrangler/ui/licences.cpp
+    diskwrangler/ui/startup.cpp
     diskwrangler/ui/viewerdialog.cpp
     diskwrangler/ui/volumepane.cpp
     diskwrangler/app/appinfo.h
@@ -135,6 +136,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/handoffdialog.h
     diskwrangler/ui/importsession.h
     diskwrangler/ui/licences.h
+    diskwrangler/ui/startup.h
     diskwrangler/ui/treecolumns.h
     diskwrangler/ui/uihelpers.h
     diskwrangler/ui/viewerdialog.h

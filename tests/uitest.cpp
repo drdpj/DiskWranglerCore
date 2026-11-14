@@ -1,11 +1,17 @@
 // Part of DiskWranglerCore - Copyright (C) 2026 Daniel Jameson - GPL v3 or later
 // uitest: the window kit (5c, 5e, 5f, 5g: rows, Delete, Extract, the import session, Properties, disc attributes, Check,
-// the open pipeline with the hand-over's Locate...),
+// the open pipeline with the hand-over's Locate...; 6c: Copy and Paste's clipboard, the panes' drops, files dropped on
+// an empty window, a new window of the program's class, the start-up),
 // the small helpers both programs use (file dialog filters, sizes, root labels, delete keys, tree column
 // layout), the plain text and hex views, the viewer registry (order, replacing, choosing the view to open on) and the
 // viewer dialog built on it (view menu, a view's check boxes, the 1 MiB limit, "Save as text" names). Run offscreen.
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
+#include <QDir>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QComboBox>
 #include <QHeaderView>
 #include <QLabel>
@@ -16,6 +22,10 @@
 #include <QTreeWidget>
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
+#ifdef Q_OS_UNIX
+#include <utime.h>
+#endif
 #include <diskwrangler/text/textviews.h>
 #include <diskwrangler/text/viewers.h>
 #include <diskwrangler/ui/treecolumns.h>
@@ -31,6 +41,8 @@
 #include <QJsonObject>
 #include <diskwrangler/ui/discwindow.h>
 #include <diskwrangler/ui/handoffdialog.h>
+#include <diskwrangler/ui/startup.h>
+#include <diskwrangler/xfer/mime.h>
 #include <diskwrangler/xfer/retrofiles.h>
 #include "memvolume.h"
 
@@ -922,6 +934,232 @@ static void kitTests() {
     dw::ui::DiscWindow::autoAnswer = false;
 }
 
+// Step 6c: a pane whose drop rules the test sets, and a window with one; what each drop signal gave.
+class RulesPane : public dw::ui::VolumePane {
+public:
+    DropRules rules;
+    using VolumePane::acceptable;
+protected:
+    DropRules dropRules() const override { return rules; }
+};
+class DropWindow : public KitWindow {
+public:
+    explicit DropWindow(memvol::MemDocument *d) : KitWindow(d, {}, false) {
+        setupKit();
+        rp()->setDragSource(id(), 3);
+        rp()->setAcceptDrops(true);
+        connect(rp(), &dw::ui::VolumePane::internalDrop, this, [this](const QByteArray &p, QTreeWidgetItem *) { got << "items:" + QString(p); });
+        connect(rp(), &dw::ui::VolumePane::retroFilesDropped, this, [this](const QByteArray &j, QTreeWidgetItem *) { got << "json:" + QString(j); });
+        refresh();
+    }
+    RulesPane *rp() const { return static_cast<RulesPane *>(pane()); }
+    QStringList got;                                           // the drop signals, and droppedOnDisc's paths
+    using DiscWindow::hostFilesDropped;
+protected:
+    dw::ui::VolumePane *createPane(const QString &) override { return new RulesPane; }
+    void droppedOnDisc(dw::ui::VolumePane *, QTreeWidgetItem *, const QStringList &paths) override { got << "disc:" + paths.join(","); }
+};
+// A window the kit makes with makeWindow (a default constructor), for New window and createWindow.
+class MadeWindow : public KitWindow {
+public:
+    MadeWindow() : KitWindow(new memvol::MemDocument(1)) { ++count; }
+    static int count;
+protected:
+    DiscWindow *createWindow() override { return makeWindow<MadeWindow>(); }
+};
+int MadeWindow::count = 0;
+// Files dropped on a window that opens them: which were opened here and which in new windows.
+class OpensWindow : public KitWindow {
+public:
+    explicit OpensWindow(memvol::MemDocument *d) : KitWindow(d) {}
+    QStringList opened;                                        // "<window>:<file>", in order
+    QList<OpensWindow *> made;
+    QString fails;                                             // a file that doesn't open
+    bool closeFailed = true;
+    using DiscWindow::hostFilesDropped;
+    using DiscWindow::openFile;
+protected:
+    bool detectImage(const QString &p, int, dw::fs::Verdict *v) override {
+        *v = dw::fs::Verdict();                                // nothing recognised: openDocument with no reading
+        return QFileInfo(p).fileName() != fails;
+    }
+    bool openDocument(const QString &p, const dw::fs::Verdict &, const dw::fs::Candidate *, int) override {
+        opened << QString("%1:%2").arg(m_root ? "new" : "this").arg(QFileInfo(p).fileName());
+        static_cast<memvol::MemDocument *>(document())->closed = false;
+        return true;
+    }
+    bool dropSkipsFile(const QString &p) const override { return DiscWindow::dropSkipsFile(p) || p.endsWith(".skip"); }
+    DiscWindow *createWindow() override {
+        auto *d = new memvol::MemDocument(1);
+        d->closed = true;
+        auto *w = new OpensWindow(d);
+        w->m_root = m_root ? m_root : this;
+        w->fails = fails;
+        w->m_log = m_log ? m_log : &opened;
+        w->show();
+        made << w;
+        return w;
+    }
+    bool closeFailedWindow() const override { return closeFailed; }
+    void afterOpen(const QString &) override { if (m_log) *m_log << opened; opened.clear(); }
+public:
+    OpensWindow *m_root = nullptr;
+    QStringList *m_log = nullptr;
+};
+
+static QMimeData *mimeWith(const QMap<QString, QByteArray> &formats, const QList<QUrl> &urls = {}) {
+    auto *m = new QMimeData;
+    for (auto it = formats.begin(); it != formats.end(); ++it) m->setData(it.key(), it.value());
+    if (!urls.isEmpty()) m->setUrls(urls);
+    return m;
+}
+static bool sendDrop(QTreeWidget *t, QMimeData *m) {
+    const QPoint pt(5, 5);
+    QDragEnterEvent en(pt, Qt::CopyAction, m, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(t->viewport(), &en);
+    QDropEvent ev(QPointF(pt), Qt::CopyAction, m, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(t->viewport(), &ev);
+    return en.isAccepted();
+}
+
+static void sixcTests() {
+    using dw::fs::Path;
+    using DW = dw::ui::DiscWindow;
+    printf("== window kit: Copy and Paste's clipboard (step 6c)\n");
+    {
+        QTemporaryDir tmp;
+        dw::TransferItem f, d, k1, k2;
+        f.name = "ONE"; f.data = "one";
+        k1.name = "K1"; k1.data = "k1"; k2.name = "K2"; k2.data = "k2";
+        d.name = "DIR"; d.isDir = true; d.kids = {k1, k2};
+        dw::DragSpec spec;
+        spec.policy = std::make_shared<dw::xfer::HostPolicy>();
+        spec.filesystem = "mem"; spec.generator = "Kit Test"; spec.imageName = "kit.img";
+        spec.tempPrefix = tmp.path() + "/kit-drag-";
+        CHECK(DW::publishCopy({f, d}, spec) == 3, "publishCopy counts the files, those in folders too");
+        const QMimeData *cm = QApplication::clipboard()->mimeData();
+        CHECK(cm && cm->hasFormat(DW_MIME_CLIP) && cm->hasFormat(dw::xfer::RetroFilesMime) && cm->hasUrls() &&
+                  cm->hasFormat("x-special/gnome-copied-files") && DW::clipboardUsable(),
+              "the clipboard: this program's token, the retro-files JSON, the files, GNOME's list");
+        QStringList took;
+        DW::PasteTo to;
+        to.copied = [&](const QVector<dw::TransferItem> &v) { took << "copied"; for (const auto &x : v) took << x.name + QString::number(x.kids.size()); };
+        to.retroFiles = [&](const QByteArray &) { took << "json"; };
+        to.paths = [&](const QStringList &p) { took << "paths"; for (const QString &x : p) took << QFileInfo(x).fileName(); };
+        CHECK(DW::pasteClipboard(to) && took == QStringList({"copied", "ONE0", "DIR2"}), qPrintable("this program's copy, nothing written: " + took.join(",")));
+        CHECK(QDir(tmp.path()).entryList({"kit-drag-*"}, QDir::Dirs).isEmpty(), "no drag folder made for a paste here");
+        took.clear();
+        QApplication::clipboard()->setMimeData(mimeWith({{DW_MIME_CLIP, "1:1"}, {dw::xfer::RetroFilesMime, "{}"}}));
+        CHECK(DW::clipboardUsable() && DW::pasteClipboard(to) && took == QStringList({"json"}), "another process's token: the retro-files JSON");
+        took.clear();
+        QApplication::clipboard()->setMimeData(mimeWith({}, {QUrl::fromLocalFile("/tmp/a.txt"), QUrl("http://example.com/b")}));
+        CHECK(DW::pasteClipboard(to) && took == QStringList({"paths", "a.txt"}), "a file manager's files (local ones only)");
+        took.clear();
+        QApplication::clipboard()->setMimeData(mimeWith({{"x-special/gnome-copied-files", "copy\nfile:///tmp/g1\nfile:///tmp/g2"}}));
+        CHECK(DW::clipboardUsable() && DW::pasteClipboard(to) && took == QStringList({"paths", "g1", "g2"}), "GNOME's list (its first line is copy or cut)");
+        took.clear();
+        QApplication::clipboard()->setText("just text");
+        CHECK(!DW::clipboardUsable() && !DW::pasteClipboard(to) && took.isEmpty(), "plain text: nothing to paste");
+        QApplication::clipboard()->clear();
+    }
+
+    printf("== window kit: drops sorted by the pane (step 6c)\n");
+    {
+        memvol::MemDocument doc(1, "/tmp/drops.img");
+        DropWindow w(&doc), other(&doc);
+        RulesPane *t = w.rp();
+        const QByteArray mine = t->sourceTag(), theirs = other.rp()->sourceTag();
+        CHECK(mine == QByteArray::number(qint64(QCoreApplication::applicationPid())) + ":" + QByteArray::number(w.id()) + ":3",
+              "a pane's tag: pid:window:pane");
+        const QByteArray json = "{\"format\":\"retro-files\"}";
+        const QList<QUrl> files = {QUrl::fromLocalFile("/tmp/f1"), QUrl::fromLocalFile("/tmp/f2")};
+        auto drop = [&](QMimeData *m) { w.got.clear(); const bool ok = sendDrop(t, m); delete m; return ok; };
+        CHECK(drop(mimeWith({{DW_MIME_ITEMS, "payload"}, {DW_MIME_SOURCE, theirs}, {dw::xfer::RetroFilesMime, json}}, files)) &&
+                  w.got == QStringList({"items:payload"}), "items from another window of this process: internalDrop, nothing else");
+        CHECK(!drop(mimeWith({{DW_MIME_ITEMS, "payload"}, {DW_MIME_SOURCE, mine}}, files)) && w.got.isEmpty(), "not back onto the pane they came from");
+        t->rules.fromItself = true;
+        CHECK(drop(mimeWith({{DW_MIME_ITEMS, "payload"}, {DW_MIME_SOURCE, mine}})) && w.got == QStringList({"items:payload"}), "... unless the pane takes them (fromItself)");
+        t->rules = {};
+        QByteArray stranger = theirs;
+        stranger.prepend("9");                                  // another process
+        CHECK(drop(mimeWith({{DW_MIME_ITEMS, "payload"}, {DW_MIME_SOURCE, stranger}, {dw::xfer::RetroFilesMime, json}}, files)) &&
+                  w.got == QStringList({"json:" + QString(json)}), "another process's items: its retro-files JSON");
+        QByteArray gone = QByteArray::number(qint64(QCoreApplication::applicationPid())) + ":12345:0";
+        CHECK(!dw::ui::VolumePane::fromThisProcess(mimeWith({{DW_MIME_ITEMS, "x"}, {DW_MIME_SOURCE, gone}})), "a window that isn't open: not ours");
+        CHECK(drop(mimeWith({}, files)) && w.got == QStringList({"disc:/tmp/f1,/tmp/f2"}), "local files: pathsDropped, then droppedOnDisc (a disc is open)");
+        t->rules.filesNotJson = true;
+        CHECK(drop(mimeWith({{dw::xfer::RetroFilesMime, json}}, files)) && w.got == QStringList({"disc:/tmp/f1,/tmp/f2"}), "filesNotJson: the files, not the JSON");
+        t->rules = {};
+        t->rules.take = false;
+        CHECK(!drop(mimeWith({{dw::xfer::RetroFilesMime, json}}, files)) && w.got.isEmpty(), "take false: nothing");
+        t->rules = {};
+        t->rules.filesOnly = true;
+        CHECK(!drop(mimeWith({{dw::xfer::RetroFilesMime, json}})) && w.got.isEmpty(), "filesOnly: not JSON alone");
+        CHECK(drop(mimeWith({{dw::xfer::RetroFilesMime, json}}, files)) && w.got == QStringList({"json:" + QString(json)}),
+              "filesOnly takes a drop with files; the drop is still sorted as usual");
+        CHECK(!t->acceptable(mimeWith({{"text/plain", "x"}})), "anything else: not taken");
+    }
+
+    printf("== window kit: files dropped on a window that opens them; a new window (step 6c)\n");
+    {
+        QTemporaryDir tmp;
+        const QString dir = tmp.path();
+        for (const char *n : {"a.img", "b.img", "c.img", "x.skip", "bad.img"}) { QFile f(dir + "/" + n); f.open(QIODevice::WriteOnly); f.write("x"); }
+        QDir().mkpath(dir + "/folder");
+        memvol::MemDocument doc(1);
+        doc.closed = true;
+        QStringList log;
+        OpensWindow w(&doc);
+        w.m_log = &log;
+        w.fails = "bad.img";
+        w.hostFilesDropped(w.pane(), nullptr, {dir + "/folder", dir + "/a.img", dir + "/x.skip", dir + "/b.img", dir + "/bad.img", dir + "/c.img"});
+        CHECK(log.isEmpty(), "queued: nothing opens inside the drop handler");
+        QCoreApplication::processEvents();
+        CHECK(log == QStringList({"this:a.img", "new:b.img", "new:c.img"}), qPrintable("the first here, the rest in new windows; folders and skipped files left: " + log.join(",")));
+        CHECK(w.made.size() == 3 && !w.made[1]->isVisible() && w.made[0]->isVisible() && w.made[2]->isVisible(),
+              "a new window whose disc didn't open is closed again (closeFailedWindow)");
+        for (OpensWindow *x : w.made) delete x;
+        // a window with a disc: droppedOnDisc (the default does nothing)
+        memvol::MemDocument open1(1);
+        DropWindow dw(&open1);
+        dw.hostFilesDropped(dw.pane(), nullptr, {dir + "/a.img"});
+        CHECK(dw.got == QStringList({"disc:" + dir + "/a.img"}), "a disc open: droppedOnDisc");
+        // makeWindow and New window
+        auto *m = DW::makeWindow<MadeWindow>();
+        CHECK(MadeWindow::count == 1 && m->isVisible() && m->testAttribute(Qt::WA_DeleteOnClose), "makeWindow: shown, deleted when closed");
+        m->newWindow();
+        CHECK(MadeWindow::count == 2, "New window: createWindow");
+        for (DW *x : DW::all()) if (dynamic_cast<MadeWindow *>(x)) x->close();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        CHECK(std::none_of(DW::all().begin(), DW::all().end(), [](DW *x) { return dynamic_cast<MadeWindow *>(x) != nullptr; }), "and closed, they are deleted");
+    }
+}
+
+// Last: it changes the application's names.
+static void startupTests() {
+    printf("== the start-up (step 6c)\n");
+    CHECK(dw::xfer::dragDirPrefix("someprogram") == QDir::temp().filePath("someprogram-drag-"), "a program's drag folders");
+    const QString stale = dw::xfer::dragDirPrefix("uitestprog") + "old", fresh = dw::xfer::dragDirPrefix("uitestprog") + "new";
+    QDir().mkpath(stale);
+    QDir().mkpath(fresh);
+#ifdef Q_OS_UNIX
+    struct utimbuf t;
+    t.actime = t.modtime = time(nullptr) - 3 * 24 * 3600;
+    utime(QFile::encodeName(stale).constData(), &t);
+#endif
+    QIcon icon(QPixmap(16, 16));
+    dw::ui::setUpApplication("uitestprog", "9.8.7", icon);
+    CHECK(QCoreApplication::organizationName() == "uitestprog" && QCoreApplication::applicationName() == "uitestprog" &&
+              QCoreApplication::applicationVersion() == "9.8.7" && QGuiApplication::desktopFileName() == "uitestprog" &&
+              !QApplication::windowIcon().isNull(),
+          "names, version, desktop file, icon");
+#ifdef Q_OS_UNIX
+    CHECK(!QFileInfo::exists(stale) && QFileInfo::exists(fresh), "drag folders older than a day removed, recent ones kept");
+#endif
+    QDir(stale).removeRecursively();
+    QDir(fresh).removeRecursively();
+}
+
 int main(int argc, char **argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
@@ -1056,6 +1294,8 @@ int main(int argc, char **argv) {
 
     kitTests();
     openTests();
+    sixcTests();
+    startupTests();
 
     printf(failures ? "%d FAILURES\n" : "all ok\n", failures);
     return failures ? 1 : 0;

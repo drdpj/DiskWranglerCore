@@ -17,9 +17,16 @@
  */
 #include <diskwrangler/ui/volumepane.h>
 
+#include <QCoreApplication>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QSet>
+#include <QUrl>
 
+#include <diskwrangler/ui/discwindow.h>
 #include <diskwrangler/ui/treecolumns.h>
+#include <diskwrangler/xfer/mime.h>
+#include <diskwrangler/xfer/retrofiles.h>
 
 namespace dw {
 namespace ui {
@@ -142,6 +149,72 @@ void VolumePane::addChildren(QTreeWidgetItem *parent, int mount, const fs::Path 
         const QString k = key(mount, p);
         it->setExpanded(m_expanded.contains(k) ? m_expanded.value(k) : m_layout.expand == PaneLayout::ExpandAll);
     }
+}
+
+// ------------------------------------------------------------------------------------------- drag and drop
+
+QByteArray VolumePane::sourceTag() const {
+    return QByteArray::number(qint64(QCoreApplication::applicationPid())) + ":" + QByteArray::number(qulonglong(m_window)) +
+           ":" + QByteArray::number(m_paneNo);
+}
+
+bool VolumePane::fromThisProcess(const QMimeData *m) {
+    if (!m->hasFormat(DW_MIME_SOURCE) || !m->hasFormat(DW_MIME_ITEMS)) return false;
+    const QList<QByteArray> f = m->data(DW_MIME_SOURCE).split(':');
+    return f.size() == 3 && f[0].toLongLong() == qint64(QCoreApplication::applicationPid()) &&
+           DiscWindow::byId(f[1].toULongLong()) != nullptr;
+}
+
+QPoint VolumePane::dropPos(const QDropEvent *e) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return e->position().toPoint();
+#else
+    return e->pos();
+#endif
+}
+
+bool VolumePane::acceptable(const QMimeData *m) const {
+    const DropRules r = dropRules();
+    if (r.filesOnly) return m->hasUrls();
+    if (!r.take) return false;
+    if (fromThisProcess(m)) return m->data(DW_MIME_SOURCE) != sourceTag() || r.fromItself;   // not back onto itself
+    return m->hasFormat(xfer::RetroFilesMime) || m->hasUrls();
+}
+
+void VolumePane::dragEnterEvent(QDragEnterEvent *e) {
+    if (acceptable(e->mimeData())) e->acceptProposedAction();
+}
+
+void VolumePane::dragMoveEvent(QDragMoveEvent *e) {
+    if (!acceptable(e->mimeData())) { e->ignore(); return; }
+    e->setDropAction(Qt::CopyAction);
+    e->accept();
+}
+
+void VolumePane::dropEvent(QDropEvent *e) {
+    const QMimeData *m = e->mimeData();
+    if (!acceptable(m)) return;
+    if (fromThisProcess(m)) {                    // one of this program's own windows: copied directly
+        e->setDropAction(Qt::CopyAction);
+        e->accept();
+        emit internalDrop(m->data(DW_MIME_ITEMS), itemAt(dropPos(e)));
+        return;
+    }
+    if (!dropRules().filesNotJson && m->hasFormat(xfer::RetroFilesMime)) {   // another program, or another copy of this one
+        const QByteArray json = m->data(xfer::RetroFilesMime);
+        if (!json.isEmpty()) {
+            e->setDropAction(Qt::CopyAction);
+            e->accept();
+            emit retroFilesDropped(json, itemAt(dropPos(e)));
+            return;
+        }
+    }
+    QStringList paths;
+    for (const QUrl &u : m->urls())
+        if (u.isLocalFile()) paths << u.toLocalFile();
+    if (paths.isEmpty()) return;
+    e->acceptProposedAction();
+    emit pathsDropped(paths, itemAt(dropPos(e)));
 }
 
 } // namespace ui

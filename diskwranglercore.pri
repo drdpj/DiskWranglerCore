@@ -38,6 +38,7 @@ HEADERS += $$PWD/diskwrangler/app/appinfo.h \
            $$PWD/diskwrangler/ui/handoffdialog.h \
            $$PWD/diskwrangler/ui/importsession.h \
            $$PWD/diskwrangler/ui/licences.h \
+           $$PWD/diskwrangler/ui/startup.h \
            $$PWD/diskwrangler/ui/treecolumns.h \
            $$PWD/diskwrangler/ui/uihelpers.h \
            $$PWD/diskwrangler/ui/viewerdialog.h \
@@ -53,5 +54,6 @@ SOURCES += $$PWD/diskwrangler/app/handoff.cpp \
            $$PWD/diskwrangler/ui/handoffdialog.cpp \
            $$PWD/diskwrangler/ui/importsession.cpp \
            $$PWD/diskwrangler/ui/licences.cpp \
+           $$PWD/diskwrangler/ui/startup.cpp \
            $$PWD/diskwrangler/ui/viewerdialog.cpp \
            $$PWD/diskwrangler/ui/volumepane.cpp

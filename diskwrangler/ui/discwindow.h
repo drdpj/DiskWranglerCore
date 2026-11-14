@@ -39,8 +39,9 @@
 //  2. Build the menus, the button bar and its own actions from action(Act::...) in its own order.
 //  3. refresh(). After any change: refresh() (or refreshChanged); the kit keeps the rows' expansion and selection as
 //     the pane's layout says, and shows each group's tab or not as paneShown says.
-// Slots a test calls by name stay on the program's window (as forwarding functions if the kit does the work) until
-// the tests are ported after step 5.
+// What both programs used to write alike around the window is the kit's too (step 6c): Copy and Paste's clipboard
+// (publishCopy, pasteClipboard), the panes' drop sorting (VolumePane), what an empty window does with dropped files,
+// a new window of the program's class (makeWindow), and the start-up in main() (startup.h).
 
 #include <QHash>
 #include <QJsonArray>
@@ -56,12 +57,14 @@
 #include <diskwrangler/app/document.h>
 #include <diskwrangler/fs/detection.h>
 #include <diskwrangler/fs/volume.h>
+#include <diskwrangler/ui/dragoutmime.h>
 #include <diskwrangler/ui/importsession.h>
 #include <diskwrangler/ui/volumepane.h>
 #include <diskwrangler/xfer/retrofiles.h>
 #include <diskwrangler/xfer/transferitem.h>
 
 class QAction;
+class QMimeData;
 class QTabWidget;
 
 namespace dw {
@@ -137,6 +140,15 @@ public:
     // Tests: no message boxes or questions (each question takes its first, "go ahead" answer; a message goes to the
     // status line as "Title: first line").
     static bool autoAnswer;
+    // A new window of the program's class W, shown, deleted when it is closed: a program's createWindow() is
+    // `return makeWindow<MainWindow>();` (New window, Open... in a new window, dropped images and the command line's
+    // images all come through createWindow).
+    template <class W> static W *makeWindow() {
+        auto *w = new W;
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        w->show();
+        return w;
+    }
 
     virtual app::Document *document() const = 0;
     virtual app::AppInfo appInfo() const = 0;
@@ -206,6 +218,27 @@ public:
     // The disc of the current document, or null (PaneHost).
     const fs::Disc *paneDisc() const override;
 
+    // ----- Copy and Paste (step 6c): the clipboard's part. Which items are copied, and where a paste goes, are the
+    // program's (its copySelected and paste).
+    // Puts items on the clipboard. Inside this program a paste gets exactly these (the clipboard carries a token naming
+    // them, DW_MIME_CLIP), even if the disc has changed or its window has closed since; the desktop and other programs
+    // are offered the files (a DragOutMime built from spec: text/uri-list, the retro-files JSON and GNOME's list),
+    // written only when one asks. A clipboard still ours at quit is cleared (its files go with the drag folders).
+    // Returns the number of files, those in folders included.
+    static int publishCopy(const QVector<TransferItem> &items, const DragSpec &spec);
+    // Whether the clipboard holds something Paste can add: this program's copy, retro-files JSON, local files.
+    static bool clipboardUsable();
+    // Where each kind of clipboard goes.
+    struct PasteTo {
+        std::function<void(const QVector<TransferItem> &)> copied;   // this program's own Copy: nothing written to the host
+        std::function<void(const QByteArray &)> retroFiles;          // retro-files JSON (another program, another copy)
+        std::function<void(const QStringList &)> paths;              // local files copied in a file manager (as Add files)
+    };
+    // Paste's dispatch, in that order. false: the clipboard has none of them (the program says "Nothing to paste").
+    static bool pasteClipboard(const PasteTo &to);
+    // The local files a clipboard (or drop) names: its URLs, or GNOME's x-special/gnome-copied-files list.
+    static QStringList clipboardPaths(const QMimeData *m);
+
 public slots:
     // Rebuilds every pane's rows from the volumes, keeping expansion and selection, then updateUi().
     virtual void refresh();
@@ -227,8 +260,10 @@ public slots:
     // titled "Check disc", a warning if there are errors).
     virtual void checkDisc();
 
+    // New window: createWindow().
+    virtual void newWindow() { createWindow(); }
+
     // Not generic yet: the program overrides these (each does nothing in the kit).
-    virtual void newWindow() {}
     virtual void newImageDialog() {}
     virtual void openDialog() {}
     virtual void viewSelected() {}
@@ -366,6 +401,20 @@ protected:
     // again when the disc wasn't opened in it.
     virtual DiscWindow *createWindow() { return nullptr; }
     virtual bool closeFailedWindow() const { return true; }
+
+    // ----- hooks: host files dropped on a pane (step 6c; every pane's pathsDropped comes to hostFilesDropped)
+    // A window that opens what is dropped on it (default: no document open; CP/M Disk Wrangler: no reading of the disc
+    // attached). The first file opens here, the rest in new windows (createWindow, each closed again when its disc
+    // didn't open and closeFailedWindow()), queued so that nothing opens inside the drop handler.
+    virtual bool dropOpensFiles() const;
+    // A dropped file such a window leaves alone (default: a folder; Acorn Disk Wrangler: an .inf file too).
+    virtual bool dropSkipsFile(const QString &path) const;
+    // Host files dropped on a pane of a disc that is open: the program's. CP/M Disk Wrangler imports them; Acorn Disk
+    // Wrangler opens disc images in new windows (on a hard disc it asks first) and imports the rest. Default: nothing.
+    virtual void droppedOnDisc(VolumePane *, QTreeWidgetItem *, const QStringList &) {}
+    // What a pane's pathsDropped does: dropOpensFiles() ? openDropped(paths) : droppedOnDisc(...).
+    void hostFilesDropped(VolumePane *pane, QTreeWidgetItem *target, const QStringList &paths);
+    void openDropped(const QStringList &paths);
 
     // ----- hooks: importing (importItems)
     // The session's hooks for an import into mount (ImportHooks). The kit fills conflict with askReplace if the

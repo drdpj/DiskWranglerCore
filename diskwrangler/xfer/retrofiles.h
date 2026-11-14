@@ -98,6 +98,9 @@ bool readJson(const QByteArray &json, QVector<TransferItem> *out, QString *err);
 // than maxAgeSecs; returns how many.
 QString newDragDir(const QString &prefix, QString *err);
 int cleanStale(const QString &prefix, qint64 maxAgeSecs = 24 * 3600);
+// A program's prefix: <temporary folder>/<program id>-drag- ("/tmp/cpmdiskwrangler-drag-"). Its window kit cleans its
+// stale ones at start-up (ui/startup.h).
+QString dragDirPrefix(const QString &programId);
 
 } // namespace xfer
 } // namespace dw

@@ -26,13 +26,17 @@
 #include <QJsonArray>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
+#include <QUrl>
 
 #include <diskwrangler/app/appsettings.h>
 #include <diskwrangler/app/handoff.h>
 #include <diskwrangler/ui/handoffdialog.h>
+#include <diskwrangler/xfer/mime.h>
 
 namespace dw {
 namespace ui {
@@ -70,6 +74,9 @@ void DiscWindow::setupKit() {
             if (r.isFile()) activateFile(r);
         });
         connect(p, &QWidget::customContextMenuRequested, this, &DiscWindow::showContextMenu);
+        connect(p, &VolumePane::pathsDropped, this, [this, p](const QStringList &paths, QTreeWidgetItem *target) {
+            hostFilesDropped(p, target, paths);
+        });
     }
     if (m_panes.size() == 1) {
         setCentralWidget(m_panes.first());
@@ -112,6 +119,102 @@ void DiscWindow::setupKit() {
 }
 
 VolumePane *DiscWindow::createPane(const QString &) { return new VolumePane; }
+
+// ------------------------------------------------------------------------------------------- dropped host files
+
+bool DiscWindow::dropOpensFiles() const {
+    const app::Document *d = document();
+    return !(d && d->isOpen());
+}
+
+bool DiscWindow::dropSkipsFile(const QString &path) const { return QFileInfo(path).isDir(); }
+
+void DiscWindow::hostFilesDropped(VolumePane *pane, QTreeWidgetItem *target, const QStringList &paths) {
+    if (dropOpensFiles()) openDropped(paths);
+    else droppedOnDisc(pane, target, paths);
+}
+
+void DiscWindow::openDropped(const QStringList &paths) {
+    QTimer::singleShot(0, this, [this, paths] {
+        for (const QString &p : paths) {
+            if (dropSkipsFile(p)) continue;
+            if (dropOpensFiles()) { openFile(p); continue; }      // this window while it opens nothing, then new ones
+            DiscWindow *w = createWindow();
+            if (!w) { openFile(p); continue; }
+            if (!w->openFile(p) && closeFailedWindow()) w->close();
+        }
+    });
+}
+
+// ------------------------------------------------------------------------------------------- Copy and Paste
+// Edit > Copy takes a copy of the items there and then; inside this program a paste uses that copy (the clipboard
+// carries a token naming it), so it gets what was selected at the time even if the disc has changed or its window has
+// closed since. For the desktop and other programs the clipboard offers the files, as a drag does.
+
+static QVector<TransferItem> &clipItems() { static QVector<TransferItem> v; return v; }
+static QByteArray &clipToken() { static QByteArray t; return t; }
+
+static int countFiles(const QVector<TransferItem> &v) {
+    int n = 0;
+    for (const TransferItem &x : v) n += x.isDir ? countFiles(x.kids) : 1;
+    return n;
+}
+
+int DiscWindow::publishCopy(const QVector<TransferItem> &items, const DragSpec &spec) {
+    static int serial = 0;
+    clipItems() = items;
+    clipToken() = QByteArray::number(qint64(QCoreApplication::applicationPid())) + ":" + QByteArray::number(++serial);
+    auto *m = new DragOutMime([items](QVector<TransferItem> *out, QString *) { *out = items; return true; }, spec);
+    m->setForClipboard(true);
+    m->setData(DW_MIME_CLIP, clipToken());
+    QApplication::clipboard()->setMimeData(m);
+    static bool once = false;                  // the copied files live in a folder removed at exit: don't leave
+    if (!once) {                               // a clipboard behind that names them
+        once = true;
+        QObject::connect(qApp, &QCoreApplication::aboutToQuit, [] {
+            const QMimeData *c = QApplication::clipboard()->mimeData();
+            if (c && c->hasFormat(DW_MIME_CLIP) && QApplication::clipboard()->ownsClipboard()) QApplication::clipboard()->clear();
+        });
+    }
+    return countFiles(items);
+}
+
+QStringList DiscWindow::clipboardPaths(const QMimeData *m) {
+    QStringList paths;
+    for (const QUrl &u : m->urls())
+        if (u.isLocalFile()) paths << u.toLocalFile();
+    if (paths.isEmpty() && m->hasFormat("x-special/gnome-copied-files")) {
+        const QList<QByteArray> lines = m->data("x-special/gnome-copied-files").split('\n');
+        for (int i = 1; i < lines.size(); ++i) {               // line 0 is "copy" or "cut"
+            QUrl u = QUrl::fromEncoded(lines[i].trimmed());
+            if (u.isLocalFile()) paths << u.toLocalFile();
+        }
+    }
+    return paths;
+}
+
+bool DiscWindow::clipboardUsable() {
+    const QMimeData *m = QApplication::clipboard()->mimeData();
+    return m && (m->hasFormat(DW_MIME_CLIP) || m->hasFormat(xfer::RetroFilesMime) || m->hasUrls() ||
+                 m->hasFormat("x-special/gnome-copied-files"));
+}
+
+bool DiscWindow::pasteClipboard(const PasteTo &to) {
+    const QMimeData *m = QApplication::clipboard()->mimeData();
+    if (!m) return false;
+    if (m->hasFormat(DW_MIME_CLIP) && !clipToken().isEmpty() && m->data(DW_MIME_CLIP) == clipToken()) {
+        to.copied(clipItems());                            // copied in this program: nothing written to the host
+        return true;
+    }
+    if (m->hasFormat(xfer::RetroFilesMime)) {              // another copy of this program, or another program
+        const QByteArray json = m->data(xfer::RetroFilesMime);
+        if (!json.isEmpty()) { to.retroFiles(json); return true; }
+    }
+    const QStringList paths = clipboardPaths(m);           // files copied in a file manager: as Add files
+    if (paths.isEmpty()) return false;
+    to.paths(paths);
+    return true;
+}
 
 VolumePane *DiscWindow::pane(const QString &group) const {
     const int i = m_groups.indexOf(group);

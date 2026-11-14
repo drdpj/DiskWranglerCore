@@ -236,5 +236,7 @@ int cleanStale(const QString &prefix, qint64 maxAgeSecs) {
     return n;
 }
 
+QString dragDirPrefix(const QString &programId) { return QDir::temp().filePath(programId + "-drag-"); }
+
 } // namespace xfer
 } // namespace dw
