@@ -46,7 +46,7 @@ with `ldd`. Never include a `ui/` header from a class the console program uses.
 The core is a git submodule at `core/`, pinned to a tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.0.0
+    git -C core checkout v1.1.0
     git add core .gitmodules
 
 qmake compiles the core's sources into the program. The window's `.pro`:
@@ -199,7 +199,7 @@ program:
      `paneLayout(group)` (columns and expansion rules);
    - rows: `decorateRow` (cells from the program's own classes), `rootLabel`, and on `PaneHost` `orderRows` and
      `listChildren`; panes: `paneGroups`, `paneShown`, `paneTitle`, `createPane` (a `VolumePane` subclass with the
-     program's drag code);
+     program's drag code: `makeMime`, and a `startDrag` that sets the drag's picture and runs it with `execDragOut`);
    - opening: `detectImage` (the program's probes, a `Verdict`), `openDocument`, `afterOpen`, `handOverMessage`,
      `createWindow` (usually `return makeWindow<MainWindow>();`: New window, Open... and dropped images use it);
    - drops: the pane subclass's `dropRules()` (what it takes: only files, nothing on a read-only disc, items from
@@ -233,6 +233,12 @@ carry the private MIME types of `xfer/mime.h` between the program's own windows.
 (items from a window of this process, by the "pid:window:pane" tag its `setDragSource` gives; retro-files JSON; local
 files) and emits `internalDrop`, `retroFilesDropped` or `pathsDropped`; the program connects the first two to its
 imports (`pathsDropped` goes to the window's `droppedOnDisc`, or opens the files in a window with nothing open).
+A drag out is run by the pane's `execDragOut(drag)` (v1.1.0): copy only, the drag never deleted (on X11 the target
+asks for the files after `exec()` returns), its data served on X11 by the kit (`ui/xdndsource.h`: Qt's own xcb
+answers leave GTK 4 and GNOME's XWayland bridge waiting), and its outcome reported once it is known:
+`dragOutFinished(files, dirs, errors)` when another program asked for the files and they were written,
+`dragOutNothing()` when the drop was refused or cancelled or no file was asked for (a drop on a window of this
+program reports neither: its import does). The program shows each in its own words.
 
 `main()` is the kit's start-up (`ui/startup.h`), with anything of the program's own between its steps:
 

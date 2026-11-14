@@ -864,3 +864,24 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
     `tests/run_all.sh` like CP/M Disk Wrangler's.
 11. **The interfaces are settled: v1.0.0.** From here a new major version means an interface break; `docs/guide.md` is
     the recipe for a new program on the core. `DW_CORE_VERSION` is 1.0.0 (`clitest` expects it).
+
+## Amendments after step 6
+
+1. **Dragging out on Linux (series 6c-2, core v1.1.0).** Dragging files out of either program onto GNOME Files
+   (Nautilus) or a terminal gave nothing on Ubuntu, X11 or Wayland, though the window said "Dragged out". The cause
+   is in Qt's xcb drag code (`qxcbdrag.cpp`, Qt 5.15 to the current development branch), which the programs use on
+   X11 and, under XWayland, on a GNOME Wayland session (`beforeApplication` chooses `xcb;wayland` there): a request
+   for a format the drag doesn't have is answered with a SelectionNotify naming no target, and TARGETS isn't answered
+   at all. GTK 4 asks first for its portal formats (`application/vnd.portal.filetransfer`, then `...files`), and
+   mutter's XWayland bridge, which hands an X11 drag to every Wayland program on GNOME, asks first for TARGETS; both
+   take only an answer naming the target they asked for, so both wait for ever and never get to `text/uri-list`.
+   (GTK 3 and Qt targets ask for an offered format and were never affected; Qt on Wayland, the clipboard, Windows and
+   macOS were never affected.) The kit now answers the drag's selection requests itself on X11
+   (`ui/xdndsource.h`, `serveXdnd`: a native event filter, the few xcb calls looked up at run time so nothing new is
+   needed to build): TARGETS with the formats offered, each offered format with its data, anything else refused as X
+   expects. The files are still written only when a target asks for them. `VolumePane::execDragOut` runs the
+   programs' drags and reports the outcome when it is known (`dragOutFinished`, `dragOutNothing`): on X11 the target
+   asks after `QDrag::exec()` returns, so "Dragged out" used to be decided too early - missing after a drop that
+   worked, and never a word after one that copied nothing. Both programs show "nothing was copied" in their own words
+   (deliberate change 12). Tests: both programs' `xdragtest` drop onto a target written on xcb that asks as GTK 4
+   and mutter do (`tests/xdndtarget.h`) and onto one that never asks. `DW_CORE_VERSION` is 1.1.0.
