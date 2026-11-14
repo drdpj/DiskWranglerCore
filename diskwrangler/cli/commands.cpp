@@ -1531,27 +1531,6 @@ bool hostReadFailed(const QVector<xfer::HostReadError> &errors, QString *err, in
     return true;
 }
 
-// Before 5l the console programs' own reader; now a forward onto the one host reader (xfer::readHost), with accept
-// asked about each file after it is read, as before.
-static void acceptAll(QVector<TransferItem> *items, const HostFileFilter &accept) {
-    QVector<TransferItem> kept;
-    for (TransferItem &t : *items) {
-        if (t.isDir) { acceptAll(&t.kids, accept); kept << t; continue; }
-        if (!accept(QFileInfo(t.hostPath).absoluteFilePath(), &t)) continue;
-        kept << t;
-    }
-    *items = kept;
-}
-
-bool readHostTree(const QStringList &paths, const HostFileFilter &accept, QVector<TransferItem> *items, QString *err, int *exit) {
-    QVector<xfer::HostReadError> errors;
-    QVector<TransferItem> got = xfer::readHost(paths, xfer::HostReadOptions(), &errors);
-    if (hostReadFailed(errors, err, exit)) return false;
-    if (accept) acceptAll(&got, accept);
-    *items += got;
-    return true;
-}
-
 } // namespace cli
 
 // ---------------------------------------------------------------------------------------------- runCli

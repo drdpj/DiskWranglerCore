@@ -661,7 +661,7 @@ Step 4b created v0.5.0: the command-line layer (`diskwrangler/cli/`, QtCore only
 
 ## Amendments from step 5
 
-Step 5 ran as series 5a-5n, core v0.6.0 to v0.13.0 (v0.13.1 is this text and the version string). It built the window
+Step 5 ran as series 5a-5n, core v0.6.0 to v0.13.0 (v0.13.1 is this text and the version string; step 6 follows below). It built the window
 kit, put both programs' main windows on it, and moved the transfer, import, open, save and new-disc code that the two
 windows shared into the core. What turned out different from the plan above is below, in the order it was built; the
 series' own records (what each one changed, what it tested, what it found) are `design/plan/history-step-5.md` and
@@ -750,7 +750,8 @@ section, this section is what was built.
     stops; it returns the items and a list of errors (cannot read, too large, not found). Each program supplies its own
     per-file hook and size limit (`RetroFiles::cpmHostRead`, `acornHostRead`) and its own messages. A path the user
     names is read as what it points to; only links met inside a folder are skipped. `TransferItem::hostPath` says
-    where an item was read from, and `dw::cli::readHostTree` is a forward onto the reader.
+    where an item was read from. (`dw::cli::readHostTree`, a forward onto the reader that step 5 left for the tests, went in
+    step 6a: `clitest`'s backend calls `readHost` itself.)
 16. **DFS letters on ADFS in the window** (5l). The window applies the `dfsLetterDirs` setting in its ADFS `place` hook
     (`placeLetter`'s flatten option, as `--letters` does for `acorndw`), not through
     `AdfsVolume::setFlattenLetters`: the hook replaces the volume's `placeIncoming`, so the volume's setting is never
@@ -782,3 +783,18 @@ section, this section is what was built.
     the tests to the new API and removes them.
 20. **`DW_CORE_VERSION`** (`cli/cli.h`, printed by `--version`) said 0.5.0 from step 4b to v0.13.0; it is 0.13.1 here and
     `clitest` expects that value. It has to be raised with each tag.
+
+## Amendments from step 6
+
+Step 6 removes what step 5 left standing so that the programs could keep their tests: it ports the tests to the new
+API and deletes the shims. Series 6a is core v0.14.0.
+
+1. **`FileOpen::FileOpenFilter<Window>`** (`diskwrangler/app/fileopen.h`) asked its window for `windows()`, `image()` and
+   `openImage()` - three of the shims step 5 meant to delete - so the template, not the programs, was what kept them
+   alive. It now uses the kit: `Window::all()` (cast to the program's window), `document()->isOpen()` and
+   `path()`, `openFile(path)`. A window with nothing open is the one that takes a file; a file already open is
+   brought forward. The behaviour (and `guitest`'s "files opened from the Finder" check) is the same.
+2. **`dw::cli::readHostTree` and `HostFileFilter` are gone** (`cli/cli.h`, `cli/commands.cpp`). Nothing used them but
+   `clitest`'s test backend, which now calls `dw::xfer::readHost` and `cli::hostReadFailed` itself, as `cpmdw` and
+   `acorndw` do.
+3. **`DW_CORE_VERSION`** is 0.14.0 (`clitest` expects it).

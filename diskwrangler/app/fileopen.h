@@ -27,8 +27,8 @@
 // forward instead of being opened twice. The work is queued, so no dialog runs inside the event.
 //
 // The program's main window class is the template argument, so this header needs nothing from the program:
-// FileOpen::FileOpenFilter<MainWindow>. That class needs only Window::windows(), image().isOpen(), image().path()
-// and openImage(path), which both programs have, and Q_OBJECT (for qobject_cast).
+// FileOpen::FileOpenFilter<MainWindow>. That class is a dw::ui::DiscWindow (all(), document(), openFile(path)) and
+// has Q_OBJECT (for qobject_cast).
 
 #include <QApplication>
 #include <QEvent>
@@ -51,24 +51,26 @@ template <class Window>
 void open(const QString &path) {
     const QString canonical = QFileInfo(path).canonicalFilePath();
     Window *empty = qobject_cast<Window *>(QApplication::activeWindow());
-    if (empty && empty->image().isOpen()) empty = nullptr;
-    for (Window *w : Window::windows()) {
-        const QString held = w->image().isOpen() ? w->image().path() : QString();
+    if (empty && empty->document()->isOpen()) empty = nullptr;
+    for (auto *dw : Window::all()) {
+        Window *w = qobject_cast<Window *>(dw);
+        if (!w) continue;
+        const QString held = w->document()->isOpen() ? w->document()->path() : QString();
         if (!held.isEmpty() && !canonical.isEmpty() && QFileInfo(held).canonicalFilePath() == canonical) {
             bringForward(w);                                // already open here: don't open it twice
             return;
         }
-        if (!empty && !w->image().isOpen()) empty = w;
+        if (!empty && !w->document()->isOpen()) empty = w;
     }
     if (empty) {
         bringForward(empty);
-        empty->openImage(path);
+        empty->openFile(path);
         return;
     }
     auto *w = new Window;
     w->setAttribute(Qt::WA_DeleteOnClose);
     w->show();
-    if (!w->openImage(path)) w->close();
+    if (!w->openFile(path)) w->close();
 }
 
 template <class Window>

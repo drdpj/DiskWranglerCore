@@ -254,5 +254,4 @@ A backend's `readHost` reads host files and folders with the core's one host rea
 ignoring case, symbolic links inside a folder skipped, any depth, the program's size limit checked before a file is
 read. The program gives it its own per-file hook (`.inf` sidecars) and size limit, and turns the errors it returns into
 its own messages; `dw::cli::hostReadFailed` gives the console programs' words and exit codes for the first one
-(`<path>: no such file or folder`, exit 3; `<path>: cannot read (<reason>)`, exit 1). `dw::cli::readHostTree` is a
-forward onto the same reader for a backend that only needs a filter.
+(`<path>: no such file or folder`, exit 3; `<path>: cannot read (<reason>)`, exit 1).

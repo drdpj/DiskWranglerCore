@@ -41,7 +41,7 @@
 #include <diskwrangler/xfer/importer.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
-#define DW_CORE_VERSION "0.13.1"      // the core tag this source is; raise it with every tag
+#define DW_CORE_VERSION "0.14.0"      // the core tag this source is; raise it with every tag
 
 namespace dw {
 namespace cli {
@@ -174,15 +174,10 @@ struct AppInfo {
 // {kind, name, size, readOnly} for info's "container" (path: the file as given; size is the file's).
 QJsonObject containerInfo(const QString &path, const device::Container &c);
 
-// Helper for readHost: the host files and folders at paths as items, read by the one host reader (xfer::readHost,
-// <diskwrangler/xfer/hostread.h>; both console programs call that directly since step 5l). accept may skip a file
-// (return false) or change its item (name, attributes); it is asked after the file is read. The first problem ends
-// it: hostReadFailed's message and exit code.
-typedef std::function<bool(const QString &hostFile, TransferItem *item)> HostFileFilter;
-bool readHostTree(const QStringList &paths, const HostFileFilter &accept, QVector<TransferItem> *items, QString *err,
-                  int *exit);
-// The console programs' words for the host reader's first error: "<path>: no such file or folder" (exit 3, not
-// found) or "<path>: cannot read (<reason>)" (exit 1). False if there is none. (A file too large is the program's.)
+// Host files and folders are read by the one host reader (xfer::readHost, <diskwrangler/xfer/hostread.h>), which never
+// stops; a command line stops at the first problem it reports. The console programs' words for that first error:
+// "<path>: no such file or folder" (exit 3, not found) or "<path>: cannot read (<reason>)" (exit 1). False if there
+// is none. (A file too large is the program's.)
 bool hostReadFailed(const QVector<xfer::HostReadError> &errors, QString *err, int *exit);
 
 } // namespace cli

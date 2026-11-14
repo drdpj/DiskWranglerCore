@@ -139,7 +139,11 @@ public:
     }
     std::shared_ptr<xfer::HostPolicy> hostPolicy(const cli::GetOptions &, QString *, int *) override { return std::make_shared<xfer::HostPolicy>(); }
     bool readHost(const QStringList &paths, const cli::PutOptions &, QVector<TransferItem> *items, QStringList *, QString *err, int *exit) override {
-        return cli::readHostTree(paths, {}, items, err, exit);
+        QVector<xfer::HostReadError> errors;
+        QVector<TransferItem> got = xfer::readHost(paths, xfer::HostReadOptions(), &errors);
+        if (cli::hostReadFailed(errors, err, exit)) return false;
+        *items += got;
+        return true;
     }
 };
 
@@ -199,7 +203,7 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 0.13.1)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 0.14.0)"), "--version: " + QString(r.out.trimmed()));
         r = dwcli({});
         CHECK(r.exit == 2, "no command: exit 2");
         r = dwcli({"frobnicate", img});
