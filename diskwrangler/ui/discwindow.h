@@ -39,6 +39,10 @@
 //  2. Build the menus, the button bar and its own actions from action(Act::...) in its own order.
 //  3. refresh(). After any change: refresh() (or refreshChanged); the kit keeps the rows' expansion and selection as
 //     the pane's layout says, and shows each group's tab or not as paneShown says.
+// A name the program also gives a function of its own hides every kit function of that name (C++): CP/M Disk
+// Wrangler's own writable() and readOnlyReason() with no argument hide the kit's writable(mount) and
+// readOnlyReason(mount), so its window brings them back with `using DiscWindow::writable;` (and readOnlyReason). The
+// same goes for deleteFiles, importItems or any other kit function a program overloads.
 // What both programs used to write alike around the window is the kit's too (step 6c): Copy and Paste's clipboard
 // (publishCopy, pasteClipboard), the panes' drop sorting (VolumePane), what an empty window does with dropped files,
 // a new window of the program's class (makeWindow), and the start-up in main() (startup.h).

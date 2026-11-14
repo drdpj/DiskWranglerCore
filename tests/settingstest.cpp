@@ -1,5 +1,5 @@
 // Part of DiskWranglerCore - Copyright (C) 2026 Daniel Jameson - GPL v3 or later
-// settingstest: where settings live on Linux (appsettings.h). Run offscreen; needs nothing else.
+// settingstest: where settings live (appsettings.h; the AppImage sections on Linux only). Run offscreen; needs nothing else.
 //  - installed (no $APPIMAGE): no portable mode - no menu item, an ini beside the program is ignored, creating fails
 //  - an AppImage: the folder is the one holding the .AppImage file; creating the ini there copies the settings,
 //    switches to it at once, and is found again at the next start
@@ -54,6 +54,9 @@ int main(int argc, char **argv) {
         CHECK(AppSettings::installedHere(dir.path()), "with its log (unins001.dat) it was installed");
     }
 
+    // The AppImage sections test Linux behaviour ($APPIMAGE is only ever set by an AppImage, which is Linux only); on
+    // Windows and macOS AppSettings never reads it, so they are left out there (they were the known failures).
+#ifdef Q_OS_LINUX
     printf("== AppImage that isn't there\n");
     qputenv("APPIMAGE", QFile::encodeName(tmp.path() + "/gone.AppImage"));
     CHECK(!AppSettings::offered(), "a missing .AppImage counts as installed");
@@ -115,6 +118,9 @@ int main(int argc, char **argv) {
     AppSettings::init();                                            // as at the next start
     CHECK(AppSettings::portable() && AppSettings().value("lastDir").toString() == "/media/stick", "found again at the next start");
     CHECK(!AppSettings::createPortableFile(&err), "a second create says it's already there");
+#else
+    printf("== the AppImage sections: skipped (Linux only)\n");
+#endif
 
     printf(failures ? "%d FAILURES\n" : "all ok\n", failures);
     return failures ? 1 : 0;
