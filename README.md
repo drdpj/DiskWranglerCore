@@ -20,7 +20,10 @@ that needs only QtCore, adds a clock that can be fixed for repeatable output (`S
 both programs' main windows are built on (`DiscWindow`, `VolumePane`, the import session, Properties and Check as
 hooks, the open pipeline with Locate... for another program), the `Importer`, the one host-file reader and the
 new-disc presets registry. Version 0.14 ports the programs' tests to that API and drops what was kept for them;
-0.15 makes `Disc::transact` the only rollback (the filesystem classes keep no snapshot of their own). The design, and
+0.15 makes `Disc::transact` the only rollback (the filesystem classes keep no snapshot of their own). Version 1.0
+moves the rest of the window code both programs wrote alike into the kit (Copy and Paste, the sorting of drops, new
+windows, the start-up in `main()`), keeps a DFS disc's title byte for byte, and settles the interfaces: from 1.0 a new
+major version means an interface break. The design, and
 how each version changed it, is in [docs/design.md](docs/design.md).
 
 **Writing a program on the core:** [docs/guide.md](docs/guide.md) shows how the pieces fit and what a program
@@ -30,7 +33,7 @@ writes itself.
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v0.15.0
+    git -C core checkout v1.0.0
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you

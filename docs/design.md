@@ -788,7 +788,9 @@ section, this section is what was built.
 
 Step 6 removes what step 5 left standing so that the programs could keep their tests: it ports the tests to the new
 API and deletes the shims (series 6a, core v0.14.0), then takes each filesystem class's own staging out (series 6b,
-core v0.15.0).
+core v0.15.0), then moves into the kit the window code both programs still wrote alike, keeps a DFS title byte for
+byte, and settles the interfaces (series 6c, core **v1.0.0**). This closes the migration: the plan above, as amended
+here, is what was built. FLEX and the flux containers come after it, as projects of their own.
 
 1. **`FileOpen::FileOpenFilter<Window>`** (`diskwrangler/app/fileopen.h`) asked its window for `windows()`, `image()` and
    `openImage()` - three of the shims step 5 meant to delete - so the template, not the programs, was what kept them
@@ -821,14 +823,44 @@ filesystem class's own staging".
    and Torch's parse the directory after every change anyway). `moduletest` checks the DFS (31-file and Watford
    62-file) and FAT classes, the programs' `voltest` the ADFS, CP/M, CP/M 3 and Torch CP/N ones: after each kind of
    change the state in memory is compared with a reload of the same staging, and so are the bytes the next write
-   makes from each. **One unfaithful case, left as it is:** a DFS title with leading or trailing spaces is kept as given
-   by `setTitle` but read back trimmed (`load`, as `attach` and `check()` always did), so after any reload the next
-   catalogue write pads it with zeros instead of spaces. Changing either side would change saved bytes; the windows
-   trim the title before setting it, so only `acorndw title` with spaces can reach it, and a run never reloads between
-   its changes.
+   makes from each. **One unfaithful case** was left at 6b: a DFS title with leading or trailing spaces was kept as given
+   by `setTitle` but read back trimmed, so after a reload the next catalogue write padded it with zeros. 6c closed it
+   (item 8: the title's bytes are kept as read).
 6. **The contract, stated where the classes are:** `volume.h` (changes, `reload`), `disc.h`, and each class's header
    (`dfs.h`, `fat.h`, Acorn's `adfs.h`, CP/M's `cpmfs.h` and `cpmstore.h`): a change made outside a transaction may
    leave part of itself behind. The tests that call the classes directly are unchanged; the new checks show both
    sides (through a transaction, nothing is left; without one, the half-done change stays until the staging is put
    back and the class reloads).
 7. **`DW_CORE_VERSION`** is 0.15.0 (`clitest` expects it).
+
+Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from item 8 (deliberate change 11).
+
+8. **A DFS title is kept byte for byte** (deliberate change 11; the owner's decision "DFS behaviour follows DFS 2.45").
+   `dw::dfs::Disc` keeps the title's 12 bytes as read (`titleBytes()`) and every catalogue write puts them back
+   unchanged, as DFS 2.45 does (its catalogue writes keep the buffer's title; only `*TITLE`, command table entry
+   `&898E`, zeroes the 12 bytes and stores the new characters, spaces included). `setTitle` writes the characters then
+   zeros, as before; `title()` shows the bytes up to the first NUL, trimmed, as before. Saved bytes change only for a
+   disc whose title is padded with spaces (or has bytes after a NUL): before, the first change wrote it back
+   zero-padded. `reload()` is faithful for every title now (item 5). `moduletest` checks it on a 31-file and a Watford
+   disc.
+9. **The window plumbing both programs wrote alike is the kit's.** Copy and Paste's clipboard
+   (`DiscWindow::publishCopy`, `clipboardUsable`, `pasteClipboard` with `PasteTo`, `clipboardPaths`: the copy kept for
+   this program behind the `DW_MIME_CLIP` token, the files offered to others, the clipboard cleared at quit, Paste's
+   dispatch); the sorting of drops (`VolumePane`: `setDragSource`, `sourceTag`, `fromThisProcess`, `dropRules`, the
+   signals `internalDrop`, `retroFilesDropped`, `pathsDropped`; QTreeWidget's `mimeData()` calls the program's
+   `makeMime`); what a window does with files dropped on it (`hostFilesDropped`: `dropOpensFiles` /
+   `openDropped` / `dropSkipsFile`, else the program's `droppedOnDisc`); a new window of the program's class
+   (`makeWindow<W>`, and New window's default `createWindow()`); and the start-up in `main()` (`ui/startup.h`:
+   `beforeApplication`, `setUpApplication`, `runWindows<W>`; the drag folders' prefix is `xfer::dragDirPrefix(id)`).
+   What differs stays the program's: which items are copied and where a paste goes, what a pane takes, the drag
+   payload and `startDrag`, and the drop of disc images on an open disc (Acorn Disk Wrangler opens them in new
+   windows, asking first on a hard disc; CP/M Disk Wrangler imports them: unifying it would be a deliberate change).
+   A program's `createWindow` is still one line (`return makeWindow<MainWindow>();`): a default the kit could give
+   without it would mean a template base class between `DiscWindow` and the program's window, more than one line saves.
+10. **Tidies.** The kit's header says that a program function with a kit function's name hides the kit's overloads
+    (and how to bring them back, `using`). `settingstest` runs its `$APPIMAGE` sections on Linux only (they were the
+    known failure on Windows). In the programs: Acorn's `XItem` is gone (its import hooks read the `TransferItem`),
+    its `hostpolicy.h` no longer includes `adfs.h` (the access flags are in `adfsflags.h`), and it has a
+    `tests/run_all.sh` like CP/M Disk Wrangler's.
+11. **The interfaces are settled: v1.0.0.** From here a new major version means an interface break; `docs/guide.md` is
+    the recipe for a new program on the core. `DW_CORE_VERSION` is 1.0.0 (`clitest` expects it).

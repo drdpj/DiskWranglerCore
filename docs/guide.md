@@ -36,7 +36,7 @@ host-file rules of its machine (Acorn's `.inf` files, CP/M's `^Z` padding), its 
 | Text | `diskwrangler/text/` | Core | the file-viewer registry with Plain and Hex viewers |
 | App | `diskwrangler/app/` | Core | `AppInfo` (who the program is), `Document` (the image a window shows), `AppSettings`, the clock `dw::now()`, files opened from the macOS Finder (`fileopen.h`), handing a disc to another program of the family (`handoff.h`) |
 | Command line | `diskwrangler/cli/` | Core | `runCli`, `Backend`, `OpenedImage`: every command, option, exit code and the JSON output |
-| UI | `diskwrangler/ui/` | Widgets | the window kit (`DiscWindow`, `VolumePane`, `ImportSession`), the viewer dialog, drag-out data (`DragOutMime`), the hand-over messages, the button bar, the licences viewer, small helpers |
+| UI | `diskwrangler/ui/` | Widgets | the window kit (`DiscWindow`, `VolumePane`, `ImportSession`), the start-up in `main()` (`startup.h`), the viewer dialog, drag-out data (`DragOutMime`), the hand-over messages, the button bar, the licences viewer, small helpers |
 
 The QtCore-only layers are what keep the console program free of QtGui and QtWidgets; the programs' CI checks that
 with `ldd`. Never include a `ui/` header from a class the console program uses.
@@ -46,7 +46,7 @@ with `ldd`. Never include a `ui/` header from a class the console program uses.
 The core is a git submodule at `core/`, pinned to a tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v0.15.0
+    git -C core checkout v1.0.0
     git add core .gitmodules
 
 qmake compiles the core's sources into the program. The window's `.pro`:
@@ -188,7 +188,9 @@ candidate detection chose, mounts their adapters on its `Disc`, and decides whic
 `MainWindow` derives from `dw::ui::DiscWindow` (`ui/discwindow.h`; its header comment lists the steps). The kit
 makes the panes, the rows, the selection (as mount and `Path`), the standard actions and their enabling, the title
 and status, Save / Save As / Revert / Close, Delete, Extract, Properties, disc attributes, Check, the open pipeline
-(detection, the "which reading?" question, hand-over with Locate...) and every import. The program:
+(detection, the "which reading?" question, hand-over with Locate...), every import, Copy and Paste's clipboard, the
+sorting of what is dropped on a pane, what a window with nothing open does with dropped files, and New window. The
+program:
 
 1. Calls `setupKit()` first in its constructor, then builds its menus and button bar from `action(Act::...)` and its
    own actions, in its own order, then `refresh()`.
@@ -199,7 +201,11 @@ and status, Save / Save As / Revert / Close, Delete, Extract, Properties, disc a
      `listChildren`; panes: `paneGroups`, `paneShown`, `paneTitle`, `createPane` (a `VolumePane` subclass with the
      program's drag code);
    - opening: `detectImage` (the program's probes, a `Verdict`), `openDocument`, `afterOpen`, `handOverMessage`,
-     `createWindow`;
+     `createWindow` (usually `return makeWindow<MainWindow>();`: New window, Open... and dropped images use it);
+   - drops: the pane subclass's `dropRules()` (what it takes: only files, nothing on a read-only disc, items from
+     itself, a drop's files rather than its JSON) and `makeMime` (its drags' payload); the window's `dropOpensFiles`
+     and `dropSkipsFile` (a window that opens what is dropped on it) and `droppedOnDisc` (host files dropped on an open
+     disc: CP/M Disk Wrangler imports them, Acorn Disk Wrangler opens disc images in new windows);
    - changes: `propertiesEditor` and `volumeEditor` (the program's own dialogs, returning what to change; the kit
      applies it in a transaction), `deleteItems`, `confirmDelete`, `deleteEachOnItsOwn`, `canRemove`;
    - imports: `importHooks(mount)` (where items go and with what attributes when the program's rules aren't the
@@ -207,7 +213,13 @@ and status, Save / Save As / Revert / Close, Delete, Extract, Properties, disc a
    - Extract: `hostPolicy(items)` (how items become host files);
    - status and messages: `statusVariants`, `presentStatus`, `message`.
 3. Overrides the slots the kit leaves empty: `newImageDialog`, `openDialog`, `viewSelected`, `addFilesDialog`,
-   `copySelected`, `paste`, `renameSelected`, `newDirectory`, `about`.
+   `addFolderDialog`, `copySelected`, `paste`, `renameSelected`, `newDirectory`, `about`. Copy and Paste are short:
+   `copySelected` exports the selection (`exportItems`) and hands it to `publishCopy` with the program's `DragSpec`;
+   `paste` works out where a paste goes and gives `pasteClipboard` the program's three imports (its own copy,
+   retro-files JSON, a file manager's files).
+
+A function of the program with the name of a kit function hides every kit function of that name (C++): bring the
+kit's back with `using DiscWindow::writable;` and so on.
 
 The kit never tests a filesystem's id: anything that names a filesystem, a character set, a format or a side order
 is a hook the program fills. Each program keeps its own `QSettings` names (`AppSettings` in place of `QSettings`).
@@ -217,7 +229,19 @@ read host files with `dw::xfer::readHost` (the program's `HostReadOptions`: its 
 sidecar files), or retro-files JSON with `dw::xfer::readJson`, then hand the items over. Copying out (Extract,
 drags, Copy) is `exportItems`, then `dw::xfer::writeHost` with the program's `HostPolicy`, or a `dw::DragOutMime`
 built from a `DragSpec` (the files are written only when a drop target asks for them). Drags and the clipboard
-carry the private MIME types of `xfer/mime.h` between the program's own windows.
+carry the private MIME types of `xfer/mime.h` between the program's own windows. A pane sorts what is dropped on it
+(items from a window of this process, by the "pid:window:pane" tag its `setDragSource` gives; retro-files JSON; local
+files) and emits `internalDrop`, `retroFilesDropped` or `pathsDropped`; the program connects the first two to its
+imports (`pathsDropped` goes to the window's `droppedOnDisc`, or opens the files in a window with nothing open).
+
+`main()` is the kit's start-up (`ui/startup.h`), with anything of the program's own between its steps:
+
+    dw::ui::beforeApplication("cpmdiskwrangler");
+    QApplication app(argc, argv);
+    dw::ui::setUpApplication("cpmdiskwrangler", APP_VERSION, appIcon());
+    return dw::ui::runWindows<MainWindow>(app, argc, argv);
+
+The program id names its settings, its desktop file and its drag folders (`xfer::dragDirPrefix`).
 
 The tests reach a window through the kit too (`document()`, `pane(group)`, `openFile`, `DiscWindow::all()`); set
 `DiscWindow::autoAnswer` so that questions take their first answer and messages go to the status line.
@@ -250,7 +274,8 @@ folder, the system's records), starts it with the image, and says so, with Locat
 
 ## Versions and changes to the core
 
-Semantic-version tags; a program pins one through its submodule. `DW_CORE_VERSION` (`cli/cli.h`, printed by
+Semantic-version tags; a program pins one through its submodule. Since 1.0.0 the interfaces are settled: a new major
+version means an interface break (a program has to change), a minor one adds something, a patch fixes. `DW_CORE_VERSION` (`cli/cli.h`, printed by
 `--version`) is raised with every tag, and `tests/clitest.cpp` with it. Never change the core from inside a program's
 `core/` folder: change DiskWranglerCore, tag it, and move each program's submodule to the tag. Anything two programs
 would write alike belongs in the core, as a hook-driven piece rather than a branch on which program it is.
