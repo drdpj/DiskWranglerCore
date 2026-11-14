@@ -39,6 +39,9 @@ struct DragState {
     int files = 0, dirs = 0;
     QString dir;
     QStringList errors;
+    // Called once, when a target has asked for the files and they are written (VolumePane::execDragOut waits on it:
+    // on X11 the target asks after QDrag::exec() has returned).
+    std::function<void()> onExtracted;
 };
 
 // How a program's drags are written out.

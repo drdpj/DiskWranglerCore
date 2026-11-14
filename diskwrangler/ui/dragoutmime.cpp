@@ -89,6 +89,11 @@ void DragOutMime::extract() const {
         for (const QJsonValue &v : j) (v.toObject()["type"].toString() == "directory" ? m_state->dirs : m_state->files)++;
     }
     QGuiApplication::restoreOverrideCursor();
+    if (m_state->onExtracted) {
+        std::function<void()> f;
+        f.swap(m_state->onExtracted);             // once
+        f();
+    }
 }
 
 } // namespace dw

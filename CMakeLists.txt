@@ -123,6 +123,7 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/startup.cpp
     diskwrangler/ui/viewerdialog.cpp
     diskwrangler/ui/volumepane.cpp
+    diskwrangler/ui/xdndsource.cpp
     diskwrangler/app/appinfo.h
     diskwrangler/app/appsettings.h
     diskwrangler/app/document.h
@@ -140,7 +141,8 @@ add_library(diskwrangler-core STATIC
     diskwrangler/ui/treecolumns.h
     diskwrangler/ui/uihelpers.h
     diskwrangler/ui/viewerdialog.h
-    diskwrangler/ui/volumepane.h)
+    diskwrangler/ui/volumepane.h
+    diskwrangler/ui/xdndsource.h)
 add_library(DiskWrangler::Core ALIAS diskwrangler-core)
 target_include_directories(diskwrangler-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-core PUBLIC DiskWrangler::Device DiskWrangler::Fs DiskWrangler::Xfer Qt${QT_VERSION_MAJOR}::Widgets)

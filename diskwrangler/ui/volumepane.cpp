@@ -18,13 +18,19 @@
 #include <diskwrangler/ui/volumepane.h>
 
 #include <QCoreApplication>
+#include <QApplication>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QPointer>
+#include <QTimer>
 #include <QSet>
 #include <QUrl>
+#include <memory>
 
 #include <diskwrangler/ui/discwindow.h>
+#include <diskwrangler/ui/dragoutmime.h>
 #include <diskwrangler/ui/treecolumns.h>
+#include <diskwrangler/ui/xdndsource.h>
 #include <diskwrangler/xfer/mime.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
@@ -171,6 +177,43 @@ QPoint VolumePane::dropPos(const QDropEvent *e) {
 #else
     return e->pos();
 #endif
+}
+
+Qt::DropAction VolumePane::execDragOut(QDrag *drag) {
+    auto *data = qobject_cast<DragOutMime *>(drag->mimeData());
+    const std::shared_ptr<DragState> state = data ? data->state() : nullptr;
+    if (data) serveXdnd(data);                   // X11: answer the target as GTK 4 and mutter expect (xdndsource.h)
+    const Qt::DropAction result = drag->exec(Qt::CopyAction, Qt::CopyAction);    // copy only: never "move" off the disc
+    // Let go on a window of this program (QDrag::target() is the widget that took it): the drop's import reports.
+    if (!state || drag->target()) return result;
+    if (result != Qt::CopyAction) {              // refused or cancelled: even files written while it passed over a
+        emit dragOutNothing();                   // program (Windows' Explorer asks on the way) weren't copied anywhere
+        return result;
+    }
+    if (state->extracted) {                      // asked during the drag (Wayland, Windows, a Qt target)
+        emit dragOutFinished(state->files, state->dirs, state->errors);
+        return result;
+    }
+    // X11: the target asks after the drop. Wait for it, a while; a target that never asks copied nothing. One of the
+    // two is reported, once; a pane closed meanwhile reports neither.
+    QPointer<VolumePane> self(this);
+    auto done = std::make_shared<bool>(false);
+    QTimer::singleShot(DragOutWaitMs, this, [this, state, done] {
+        if (*done) return;
+        *done = true;
+        state->onExtracted = nullptr;
+        emit dragOutNothing();
+    });
+    std::weak_ptr<DragState> weak = state;       // (the state holds this function: no cycle)
+    state->onExtracted = [self, weak, done] {    // called while the target waits for its answer: report afterwards
+        QTimer::singleShot(0, qApp, [self, weak, done] {
+            const std::shared_ptr<DragState> st = weak.lock();
+            if (*done || !self || !st) return;
+            *done = true;
+            emit self->dragOutFinished(st->files, st->dirs, st->errors);
+        });
+    };
+    return result;
 }
 
 bool VolumePane::acceptable(const QMimeData *m) const {

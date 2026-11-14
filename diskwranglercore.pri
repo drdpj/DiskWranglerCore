@@ -43,6 +43,7 @@ HEADERS += $$PWD/diskwrangler/app/appinfo.h \
            $$PWD/diskwrangler/ui/uihelpers.h \
            $$PWD/diskwrangler/ui/viewerdialog.h \
            $$PWD/diskwrangler/ui/volumepane.h \
+           $$PWD/diskwrangler/ui/xdndsource.h \
            $$PWD/diskwrangler/xfer/hostname.h \
            $$PWD/diskwrangler/xfer/mime.h \
            $$PWD/diskwrangler/xfer/transferitem.h
@@ -56,4 +57,5 @@ SOURCES += $$PWD/diskwrangler/app/handoff.cpp \
            $$PWD/diskwrangler/ui/licences.cpp \
            $$PWD/diskwrangler/ui/startup.cpp \
            $$PWD/diskwrangler/ui/viewerdialog.cpp \
-           $$PWD/diskwrangler/ui/volumepane.cpp
+           $$PWD/diskwrangler/ui/volumepane.cpp \
+           $$PWD/diskwrangler/ui/xdndsource.cpp

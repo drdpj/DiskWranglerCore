@@ -26,9 +26,10 @@
 // Drops (step 6c): the pane sorts what is dropped on it - items from a window of this process (the private formats of
 // xfer/mime.h), another program's retro-files JSON, local files - and emits one signal for each kind; which drops it
 // takes is the program's (dropRules). The program's subclass makes the drags out (makeMime, startDrag): their payload
-// is its own.
+// is its own; it runs them with execDragOut, which says what came of them (6c-2).
 
 #include <QByteArray>
+#include <QDrag>
 #include <QString>
 #include <QTreeWidget>
 #include <QVector>
@@ -141,6 +142,10 @@ public:
     // Where a drop event is, in the viewport (QDropEvent::pos() is deprecated in Qt 6, position() new in it).
     static QPoint dropPos(const QDropEvent *e);
 
+    // How long a drag let go outside the program waits for the target to ask for its files (on X11 it asks after
+    // QDrag::exec() returns) before dragOutNothing says none were (6c-2).
+    static constexpr int DragOutWaitMs = 5000;
+
 signals:
     // A drop, already sorted (only one is emitted): items from a window of this process (the DW_MIME_ITEMS payload,
     // the source's own), retro-files JSON from another program or copy, or local files and folders. target: the row
@@ -148,6 +153,12 @@ signals:
     void internalDrop(const QByteArray &payload, QTreeWidgetItem *target);
     void retroFilesDropped(const QByteArray &json, QTreeWidgetItem *target);
     void pathsDropped(const QStringList &paths, QTreeWidgetItem *target);
+    // What came of a drag run by execDragOut (6c-2), when it was let go outside this program (a drop on a window of
+    // this program says neither: its import reports). dragOutFinished: the target asked for the files and they were
+    // written (files and folders at the top, and what couldn't be written). dragOutNothing: the drop was refused or
+    // cancelled, or the target never asked for the files, so nothing was copied.
+    void dragOutFinished(int files, int dirs, const QStringList &errors);
+    void dragOutNothing();
 
 protected:
     // ----- hooks for the program's pane
@@ -155,6 +166,12 @@ protected:
     // The drag data for these rows (the program's own payload; null: nothing to drag). QTreeWidget's mimeData()
     // calls it.
     virtual QMimeData *makeMime(const QList<QTreeWidgetItem *> &) const { return nullptr; }
+
+    // Runs a drag made from makeMime's data (the program's startDrag sets its picture first), copy only, and reports
+    // what came of it with dragOutFinished or dragOutNothing. Its data (a DragOutMime) are served by serveXdnd on X11
+    // (xdndsource.h). The drag is not deleted: on X11 the target asks for the files after exec() returns, and Qt
+    // deletes the drag when the target has finished.
+    Qt::DropAction execDragOut(QDrag *drag);
 
     // Whether this pane takes m, by dropRules(). Only format names are looked at, never the data: asking for a drag's
     // files makes its source write them.
