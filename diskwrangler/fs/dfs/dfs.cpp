@@ -236,6 +236,16 @@ bool Disc::wr(quint32 n, const QByteArray &data, QString *err) {
 
 // ----------------------------------------------------------------- catalogue
 
+// The title as shown: up to the first NUL, trimmed. (The bytes are kept as they are: DFS 2.45 writes the catalogue
+// back with the title as read, and only *TITLE, command table entry &898E, zeroes all 12 bytes and stores the new
+// characters as given, spaces included. Some DFS versions and tools pad a title with spaces.)
+static QString titleText(const QByteArray &bytes) {
+    QByteArray t = bytes;
+    const int end = t.indexOf('\0');
+    if (end >= 0) t.truncate(end);
+    return QString::fromLatin1(t).trimmed();
+}
+
 bool Disc::attach(dw::device::Linear *disc, quint64 size, int side, const Layout &lay, QString *err) {
     m_lin = disc; m_side = side; m_lay = lay; m_len = quint32(size);
     if (!load(err)) { m_lin = nullptr; return false; }
@@ -252,12 +262,8 @@ bool Disc::load(QString *err) {
     m_sectors = sec;
     m_cycle = quint8(s1[4]);
     m_boot = (quint8(s1[6]) >> 4) & 3;
-    QByteArray tt;
-    for (int i = 0; i < 8; ++i) tt.append(s0[i]);
-    for (int i = 0; i < 4; ++i) tt.append(s1[i]);
-    int end = tt.indexOf('\0');
-    if (end >= 0) tt.truncate(end);
-    m_title = QString::fromLatin1(tt).trimmed();
+    m_titleBytes = s0.left(8) + s1.left(4);
+    m_title = titleText(m_titleBytes);
     m_files = parseEntries(s0, s1);
     m_guard = false;
     if (m_watford) {
@@ -275,9 +281,8 @@ bool Disc::load(QString *err) {
 
 bool Disc::writeCatalogue(QString *err) {
     QByteArray s0(SectorSize, 0), s1(SectorSize, 0);
-    QByteArray t = m_title.toLatin1().left(MaxTitle);
-    for (int i = 0; i < 12; ++i) {
-        char c = i < t.size() ? t[i] : 0;
+    for (int i = 0; i < MaxTitle; ++i) {             // the title's bytes as read (or as setTitle made them)
+        const char c = i < m_titleBytes.size() ? m_titleBytes[i] : 0;
         if (i < 8) s0[i] = c; else s1[i - 8] = c;
     }
     m_cycle = bcdInc(m_cycle);
@@ -500,7 +505,8 @@ bool Disc::setTitle(const QString &title, QString *err) {
     if (title.size() > MaxTitle) { *err = "the DFS disc title can be at most 12 characters"; return false; }
     for (QChar c : title)
         if (c.unicode() < 0x20 || c.unicode() > 0x7E) { *err = "the title may only contain printable ASCII characters"; return false; }
-    m_title = title;
+    m_titleBytes = title.toLatin1().leftJustified(MaxTitle, '\0');
+    m_title = titleText(m_titleBytes);
     return writeCatalogue(err);
 }
 

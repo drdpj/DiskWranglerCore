@@ -386,6 +386,90 @@ int main(int argc, char **argv) {
         CHECK(d2.attach(&l2, quint64(img.size()), 0, lay, &err) && describe(d2) == before, "read back as it was in memory");
     }
 
+    // Step 6c (deliberate change 11): a DFS title's 12 bytes are kept as read, as DFS 2.45 does, and written back
+    // unchanged by every catalogue write; only setTitle writes new ones (the characters, then zeros, as 2.45's *TITLE).
+    // title() shows them up to the first NUL, trimmed. So reload() is faithful for a space-padded title too.
+    for (const bool watford : {false, true}) {
+        printf("Step 6c: a %s DFS disc whose title is padded with spaces: the title's bytes are kept\n", watford ? "Watford 62-file" : "31-file");
+        QByteArray img(800 * 256, 0);
+        const QByteArray padded(" PAD TITLE  ");             // a leading space, two trailing: 12 bytes, no NUL
+        img.replace(0, 512, catalogue(800, ""));
+        img.replace(0, 8, padded.left(8));
+        img.replace(256, 4, padded.mid(8, 4));
+        if (watford) {
+            QByteArray c2 = catalogue(800, "");
+            for (int i = 0; i < 8; ++i) c2[i] = char(0xAA);
+            img.replace(512, 512, c2);
+        }
+        const QString path = d + (watford ? "/w6c.ssd" : "/a6c.ssd");
+        spit(path, img);
+        device::Container c;
+        CHECK(c.open(path, &err), "open: " + err);
+        device::Linear lin(&c);
+        auto disc = std::make_shared<dfs::Disc>();
+        dfs::Layout lay;
+        lay.sectorsPerSide = 800;
+        CHECK(disc->attach(&lin, quint64(img.size()), 0, lay, &err) && disc->watford() == watford, "attach: " + err);
+        CHECK(disc->title() == "PAD TITLE" && disc->titleBytes() == padded, "shown trimmed ('" + disc->title() + "'), kept as read");
+        auto vol = std::make_shared<dfs::Volume>(disc);
+        fs::Disc fd(&c);
+        fd.addMount({"drive 0", vol});
+        CHECK(vol->volumeValues()["title"] == "PAD TITLE" && vol->info().title == "PAD TITLE", "the volume shows it trimmed");
+        auto titleOnDisc = [&]() {
+            QByteArray b;
+            QString e;
+            return lin.read(0, 512, &b, &e) ? b.left(8) + b.mid(256, 4) : QByteArray();
+        };
+        QString why;
+        err.clear();
+        CHECK(disc->addFile('$', "ONE", pattern(700, 1), 0x1900, 0x8023, false, false, &err) && titleOnDisc() == padded &&
+                  dfsFaithful(*disc, c, lin, &why), "an add writes the title's bytes back unchanged: " + err + why);
+        CHECK(disc->addFile('A', "TWO", pattern(300, 2), 0, 0, true, false, &err) && disc->addFile('$', "ONE", pattern(900, 3), 0, 0, false, true, &err) &&
+                  titleOnDisc() == padded && dfsFaithful(*disc, c, lin, &why), "another add and a replace: " + err + why);
+        CHECK(disc->modify('A', "TWO", 'B', "MOVED", false, 0x3000, 0x3000, &err) && titleOnDisc() == padded && dfsFaithful(*disc, c, lin, &why),
+              "a rename and new attributes: " + err + why);
+        CHECK(disc->setBootOption(2, &err) && titleOnDisc() == padded && dfsFaithful(*disc, c, lin, &why), "the boot option: " + err + why);
+        CHECK(disc->remove('B', "MOVED", &err) && titleOnDisc() == padded && dfsFaithful(*disc, c, lin, &why), "a remove: " + err + why);
+        // through the Volume, in a transaction (the window's way), then saved and read back
+        CHECK(fd.transact([&](QString *x) { return vol->write(fs::Path(), "C.THREE", pattern(400, 4), {}, QDateTime(), false, x) &&
+                                                   vol->setVolumeAttrs({{"boot", 3}}, x); }, &err) && titleOnDisc() == padded,
+              "a write and the boot option through the volume: " + err);
+        CHECK(fd.commit(device::Container::SaveOptions(), &err), "saved: " + err);
+        {
+            QFile f(path);
+            f.open(QIODevice::ReadOnly);
+            const QByteArray b = f.readAll();
+            CHECK(b.left(8) + b.mid(256, 4) == padded, "the saved file keeps the title's bytes");
+            device::Container c2;
+            c2.open(path, &err);
+            device::Linear l2(&c2);
+            dfs::Disc d2;
+            CHECK(d2.attach(&l2, quint64(b.size()), 0, lay, &err) && describe(d2) == describe(*disc) && d2.titleBytes() == padded,
+                  "read back as it was in memory");
+        }
+        // a title set: the characters as given, then zeros (DFS 2.45's *TITLE), shown trimmed; faithful too (step 6b's
+        // one unfaithful case: a title set with spaces used to be kept as given in memory but read back trimmed)
+        CHECK(disc->setTitle(" NEW ", &err) && disc->titleBytes() == QByteArray(" NEW ").leftJustified(12, '\0') &&
+                  titleOnDisc() == disc->titleBytes() && disc->title() == "NEW" && dfsFaithful(*disc, c, lin, &why),
+              "setTitle(' NEW '): zero-padded, shown trimmed, faithful: " + err + why);
+        CHECK(disc->setTitle("TWELVE CHARS", &err) && titleOnDisc() == "TWELVE CHARS" && disc->setTitle("", &err) &&
+                  titleOnDisc() == QByteArray(12, '\0') && disc->title().isEmpty() && dfsFaithful(*disc, c, lin, &why),
+              "twelve characters, then none: " + err + why);
+        // bytes after a NUL are kept as well (a title shorter than 12 with something left behind it)
+        QByteArray odd("SHORT");
+        odd.append('\0'); odd.append("JUNK!!");
+        {
+            QByteArray cat;
+            lin.read(0, 512, &cat, &err);
+            cat.replace(0, 8, odd.left(8));
+            cat.replace(256, 4, odd.mid(8, 4));
+            CHECK(lin.write(0, cat, &err) && disc->reload(&err) && disc->title() == "SHORT" && disc->titleBytes() == odd,
+                  "a NUL in the title: shown up to it, every byte kept: " + err);
+        }
+        CHECK(disc->addFile('$', "FOUR", pattern(100, 5), 0, 0, false, false, &err) && titleOnDisc() == odd && dfsFaithful(*disc, c, lin, &why),
+              "and written back as it was: " + err + why);
+    }
+
     printf("Step 6b: a FAT floppy: Disc::transact is the only rollback, and reload() is faithful\n");
     {
         QByteArray img(737280, 0);

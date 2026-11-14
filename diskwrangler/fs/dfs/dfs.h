@@ -130,7 +130,11 @@ public:
     bool attached() const { return m_lin != nullptr; }
     int side() const { return m_side; }
 
+    // The title as shown: the 12 bytes up to the first NUL, leading and trailing spaces trimmed. The bytes themselves
+    // are kept as read and written back unchanged by every catalogue write (DFS 2.45 does the same); only setTitle
+    // writes new ones.
     QString title() const { return m_title; }
+    QByteArray titleBytes() const { return m_titleBytes; }     // the 12 bytes as on the disc (or as setTitle made them)
     int bootOption() const { return m_boot; }
     bool watford() const { return m_watford; }          // a Watford 62-file disc (two catalogues)
     int maxFiles() const { return m_watford ? MaxFilesWatford - (m_guard ? 1 : 0) : MaxFiles; }
@@ -149,6 +153,8 @@ public:
     bool remove(QChar dir, const QString &name, QString *err);
     bool modify(QChar oldDir, const QString &oldName, QChar newDir, const QString &newName, bool locked,
                 quint32 load, quint32 exec, QString *err);
+    // A new title: the characters as given, then zeros to 12 bytes, as DFS 2.45's *TITLE (which zeroes all 12 bytes
+    // first). title() then shows it trimmed.
     bool setTitle(const QString &title, QString *err);
     bool setBootOption(int opt, QString *err);       // 0 off, 1 *LOAD, 2 *RUN, 3 *EXEC (catalogue sector 1, byte 6 bits 4-5)
 
@@ -171,7 +177,8 @@ private:
     int m_side = 0;
     Layout m_lay;
     quint32 m_len = 0;
-    QString m_title;
+    QByteArray m_titleBytes;     // the title's 12 bytes (sector 0 bytes 0-7, sector 1 bytes 0-3)
+    QString m_title;             // as shown (titleText of m_titleBytes)
     int m_boot = 0;
     quint8 m_cycle = 0;
     // Watford 62-file discs
