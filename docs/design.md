@@ -885,3 +885,6 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    worked, and never a word after one that copied nothing. Both programs show "nothing was copied" in their own words
    (deliberate change 12). Tests: both programs' `xdragtest` drop onto a target written on xcb that asks as GTK 4
    and mutter do (`tests/xdndtarget.h`) and onto one that never asks. `DW_CORE_VERSION` is 1.1.0.
+2. **FLEX Disk Wrangler's installer (core v1.1.1).** `ci/installer.iss` gives the third program of the family,
+   `flexdiskwrangler`, its own AppId, so its Windows installer can be built (release tags and Run workflow). Nothing
+   else changes: a program that stays on v1.1.0 builds and behaves exactly as before. `DW_CORE_VERSION` is 1.1.1.

@@ -38,6 +38,8 @@
   #define AppGuidRaw "{88BAD00B-21F2-483B-8186-447786EAA280}"
 #elif ProgName == "cpmdiskwrangler"
   #define AppGuidRaw "{4EF59823-E240-48C7-9454-6D5F7314CA66}"
+#elif ProgName == "flexdiskwrangler"
+  #define AppGuidRaw "{00689603-064E-40A9-B35E-5F55F89DA891}"
 #else
   #error Unknown program: add its own AppId (a new GUID) here
 #endif
