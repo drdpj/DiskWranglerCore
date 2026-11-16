@@ -888,3 +888,11 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
 2. **FLEX Disk Wrangler's installer (core v1.1.1).** `ci/installer.iss` gives the third program of the family,
    `flexdiskwrangler`, its own AppId, so its Windows installer can be built (release tags and Run workflow). Nothing
    else changes: a program that stays on v1.1.0 builds and behaves exactly as before. `DW_CORE_VERSION` is 1.1.1.
+3. **A double-density disc's single-density track 0 (series `containers`, core v1.2.0).** An ImageDisk, DSK or
+   TeleDisk file whose cylinder 0 has fewer (or other-sized) sectors than the rest had no stored bytes, so nothing on a
+   `Linear` could read it: FLEX's double-density discs, Research Machines' CP/M. `Container::setOwnTrack0(true)` lets
+   cylinder 0's tracks share a shape of their own; the stored bytes are then laid out as a raw file with
+   `RawLayout::t0sectrk` / `t0seclen` holds them (`storedLayout`), and Save As raw writes that file. Off by default
+   (open and close turn it off), so Acorn and CP/M Disk Wrangler are unchanged; commit and saveAs keep it, and the copy
+   read back has it. CPC DSK has no field for FM, so a single-density track 0 in a DSK file reads back as MFM (the
+   data unchanged). `devicetest` covers it; samdisk reads the files it writes. `DW_CORE_VERSION` is 1.2.0.
