@@ -26,7 +26,8 @@
 //    head) or by the ID itself (indexOfId). A raw file has this only once it has been given a RawLayout.
 //  * Stored bytes (readStored / writeStored): the disc as one run of bytes in the order a raw file holds it -
 //    cylinder by cylinder, side 0 then side 1, the sectors of a track in ID order. For a raw file that is simply the
-//    file; for the other containers it needs every track to have the same shape. Linear (linear.h) builds on it.
+//    file; for the other containers it needs every track to have the same shape, or, with setOwnTrack0, every track
+//    but cylinder 0's (a double-density disc's single-density track 0). Linear (linear.h) builds on it.
 //
 // A raw file is read from the file as it is needed, not loaded, so a 512 MB hard disc image costs no memory.
 //
@@ -189,6 +190,16 @@ public:
     // A raw image longer than its layout keeps its tail untouched (it is never truncated by a save).
 
     // ----- the bytes as stored (see the top of this file)
+    // Off (the default), an ImageDisk, DSK or TeleDisk file has stored bytes only when all its tracks have the same
+    // shape. On, cylinder 0 may have a shape of its own (the same on each side), as a double-density disc's
+    // single-density track 0 has (FLEX's, Research Machines' CP/M): the stored bytes are then laid out as a raw file
+    // with that RawLayout::t0sectrk / t0seclen holds them (storedLayout), and Save As raw writes that file. Open
+    // and close turn it off; commit and saveAs keep it, and the copy they read back has it too. No effect on a raw file.
+    void setOwnTrack0(bool on) { m_ownTrack0 = on; }
+    bool ownTrack0() const { return m_ownTrack0; }
+    // The shape of the stored bytes as a raw file's layout (cylinders, heads, track shape, track 0's own shape);
+    // false (and why) if the container can't be read this way. A raw file: its layout, if it has one.
+    bool storedLayout(RawLayout *out, QString *why = nullptr) const;
     // How many bytes; 0 (and why) if the container can't be read this way (tracks of different shapes).
     qint64 storedSize(QString *why = nullptr) const;
     // Reads overlay staged writes. A raw file reads its padding byte beyond its end.
@@ -261,7 +272,10 @@ private:
     QByteArray sectorData(int ti, int si) const;         // data with pending writes applied
     QByteArray rawRange(qint64 off, qint64 len) const;   // raw: file + padding + staged blocks
     void stageRaw(qint64 off, const QByteArray &data, bool dropIdentical);
-    bool uniformTracks(int *trackBytes, int *seclen, QString *why) const;
+    bool tracksLayout(RawLayout *out, QString *why) const;   // the stored view's shape (not raw)
+    // where stored byte off lies: cylinder, head, sector index (ID order), offset in the sector, sector size
+    static void locateStored(const RawLayout &l, qint64 off, int *c, int *h, int *idx, int *at, int *seclen);
+    static qint64 storedOffset(const RawLayout &l, int c, int h, int idx);
     bool reopenAs(const QString &path, Kind as, const RawLayout &l, Container *out, QString *err) const;
     bool checkWritten(const Container &w, Kind as, QString *err) const;
     bool writeChecked(const QString &path, Kind as, const RawLayout &l, bool backup,
@@ -285,6 +299,7 @@ private:
     qint64 m_rawEnd = 0;                                 // raw: end of the furthest staged write
     bool m_forceSave = false;
     bool m_writable = true;
+    bool m_ownTrack0 = false;
     int m_td0Rate = -1;                                  // TeleDisk data rate / FM flag, for converting to IMD
     bool m_td0Fm = false;
 };

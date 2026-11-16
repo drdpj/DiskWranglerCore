@@ -207,6 +207,100 @@ int main(int argc, char **argv) {
         if (td.open(d + "/x.td0", &err)) CHECK(!td.commit(&err, false) && err.contains("TeleDisk"), "TeleDisk is read-only: " + err);
     }
 
+    printf("cylinder 0 of its own shape (setOwnTrack0): a double-density disc's single-density track 0\n");
+    {
+        // FLEX's 5.25" double-sided double density: 18 sectors of 256 a side, IDs 1-18 and 19-36; cylinder 0 single
+        // density, 10 a side, IDs 1-10 and 11-20
+        RawLayout dd;
+        dd.seclen = 256; dd.sectrk = 18; dd.cyls = 4; dd.heads = 2; dd.mode = 5;
+        Container m;
+        m.createBlank(Kind::Imd, dd, "own track 0");
+        CHECK(m.reshapeTrack(0, 0, 10, 256, 1, 2, &err) && m.reshapeTrack(0, 1, 10, 256, 11, 2, &err), "cylinder 0 single density");
+        for (int c = 1; c < 4; ++c) CHECK(m.reshapeTrack(c, 1, 18, 256, 19, 5, &err), "side 1 numbered on");
+        QByteArray want;
+        for (int c = 0; c < 4; ++c)
+            for (int h = 0; h < 2; ++h)
+                for (int i = 0; i < m.sectorCount(c, h); ++i) {
+                    const QByteArray s = pattern(256, c * 100 + h * 50 + i);
+                    m.write(c, h, i, s, &err);
+                    want += s;
+                }
+        CHECK(m.saveAs(d + "/own0a.imd", Kind::Imd, &err) && !m.hasPending(), "saved, so nothing is staged: " + err);
+        const qint64 size = (20 + 3 * 36) * 256;
+        CHECK(!m.ownTrack0() && m.storedSize(&err) == 0, "off: no stored view (" + err + ")");
+        QByteArray b;
+        CHECK(!m.readStored(0, 256, &b, &err) && !m.writeStored(0, "x", &err), "off: no reads or writes");
+        m.setOwnTrack0(true);
+        RawLayout sl;
+        CHECK(m.storedLayout(&sl, &err) && sl.t0sectrk == 10 && sl.t0seclen == 256 && sl.sectrk == 18 && sl.heads == 2 &&
+                  sl.cyls == 4 && sl.firstId == 1, "on: the layout of a raw file with track 0 at its own size");
+        CHECK(m.storedSize() == size && sl.bytes() == size, "on: the stored size");
+        CHECK(m.readStored(0, size, &b, &err) && b == want, "on: the stored bytes, track 0 then the rest, sides in turn");
+        Linear lin(&m);
+        CHECK(lin.size() == size && lin.read(19 * 256, 2 * 256, &b, &err) && b == want.mid(19 * 256, 512), "a Linear across cylinder 0's end");
+        const Container::Snapshot before = m.snapshot();
+        CHECK(lin.write(20 * 256 - 10, QByteArray(20, 'Z'), &err), "a write across cylinder 0's end");
+        QByteArray s0, s1;
+        CHECK(m.read(0, 1, 9, &s0) && s0.right(10) == QByteArray(10, 'Z') && m.read(1, 0, 0, &s1) && s1.left(10) == QByteArray(10, 'Z'),
+              "lands in cylinder 0 head 1 ID 20 and cylinder 1 head 0 ID 1");
+        CHECK(m.storedTouched(20 * 256 - 1, 1) && m.storedTouched(20 * 256, 1) && !m.storedTouched(21 * 256, 256), "storedTouched");
+        m.discardStored(19 * 256, 256);
+        CHECK(!m.storedTouched(19 * 256, 256) && m.storedTouched(20 * 256, 1), "discardStored drops the whole sector only");
+        m.restore(before);
+        CHECK(m.readStored(0, size, &b, &err) && b == want, "restore");
+        CHECK(m.saveAs(d + "/own0.imd", Kind::Imd, &err) && m.ownTrack0(), "saved as ImageDisk, still on: " + err);
+        Container r;
+        CHECK(r.open(d + "/own0.imd", &err) && !r.ownTrack0() && r.storedSize() == 0, "opened again: off");
+        r.setOwnTrack0(true);
+        CHECK(r.readStored(0, size, &b, &err) && b == want, "on: the same disc");
+        const Track *t0 = r.track(0, 1), *t1 = r.track(1, 1);
+        CHECK(t0 && t0->mode == 2 && t1 && t1->mode == 5 && r.indexOfId(0, 1, 11) == 0 && r.indexOfId(1, 1, 36) == 17,
+              "the file keeps each track's mode and IDs");
+        bool seen = false;
+        Container::SaveOptions o;
+        o.verify = [&](Container &w, QString *) { QByteArray x; seen = w.ownTrack0() && w.readStored(0, size, &x, &err) && x.left(3) == "abc"; return seen; };
+        CHECK(r.writeStored(0, "abc", &err) && r.commit(o, &err) && seen, "commit: the copy read back is on too: " + err);
+        CHECK(r.ownTrack0() && r.readStored(0, 3, &b, &err) && b == "abc", "and the image after it");
+        CHECK(r.saveAs(d + "/own0.dsk", Kind::Edsk, &err), "saved as extended DSK: " + err);
+        Container e;
+        CHECK(e.open(d + "/own0.dsk", &err), "opened");
+        e.setOwnTrack0(true);
+        QByteArray x;
+        CHECK(e.readStored(0, size, &x, &err) && x == want.mid(3).prepend("abc"), "the DSK holds the same disc");
+        CHECK(r.saveAs(d + "/own0.img", Kind::Raw, &err) && r.kind() == Kind::Raw, "saved as raw: " + err);
+        CHECK(slurp(d + "/own0.img") == x, "the raw file is the stored bytes, track 0 at its own size");
+        RawLayout rl = r.rawLayout();
+        CHECK(rl.t0sectrk == 10 && rl.t0seclen == 256 && rl.heads == 2 && r.read(0, 1, 9, &b) && b == x.mid(19 * 256, 256),
+              "and reads back with that layout");
+
+        // Research Machines' CP/M: an FM track 0 of 128-byte sectors on a double-density disc of 512-byte ones
+        RawLayout rm;
+        rm.seclen = 512; rm.sectrk = 9; rm.cyls = 3; rm.heads = 1; rm.mode = 5;
+        Container q;
+        q.createBlank(Kind::Imd, rm, QString());
+        CHECK(q.reshapeTrack(0, 0, 16, 128, 1, 2, &err), "an FM track 0 of 16 x 128");
+        q.setOwnTrack0(true);
+        CHECK(q.storedSize() == 16 * 128 + 2 * 9 * 512, "another sector size on track 0");
+        CHECK(q.writeStored(16 * 128 - 1, "AB", &err) && q.read(0, 0, 15, &b) && b.endsWith('A') && q.read(1, 0, 0, &b) && b.startsWith('B'),
+              "a write across it");
+
+        Container bad;
+        bad.createBlank(Kind::Imd, dd, QString());
+        bad.reshapeTrack(0, 0, 10, 256, 1, 2, &err);
+        bad.setOwnTrack0(true);
+        CHECK(bad.storedSize(&err) == 0, "cylinder 0's sides of different shapes: none (" + err + ")");
+        bad.reshapeTrack(0, 1, 10, 256, 11, 2, &err);
+        bad.reshapeTrack(2, 0, 10, 256, 1, 2, &err);
+        CHECK(bad.storedSize(&err) == 0, "another odd track: none (" + err + ")");
+        CHECK(!bad.saveAs(d + "/bad.img", Kind::Raw, &err) && leftovers(d).isEmpty(), "and no raw file: " + err);
+        RawLayout one = dd;
+        one.cyls = 1;
+        Container single;
+        single.createBlank(Kind::Imd, one, QString());
+        single.setOwnTrack0(true);
+        CHECK(single.storedLayout(&sl, &err) && sl.t0sectrk == 0 && single.storedSize() == 2 * 18 * 256, "one cylinder: its own shape");
+    }
+
     printf("SafeSave on its own\n");
     {
         spit(d + "/s.bin", "old");

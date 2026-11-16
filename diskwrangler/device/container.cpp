@@ -273,28 +273,87 @@ bool Container::streamRaw(QIODevice *dev, QString *err) const {
 
 // ------------------------------------------------------------------------------------------- the bytes as stored
 
-bool Container::uniformTracks(int *trackBytes, int *seclen, QString *why) const {
-    const Track *t0 = track(0, 0);
-    if (!t0 || t0->secs.isEmpty()) { if (why) *why = "the image has no first track"; return false; }
-    const int n = t0->secs.size(), size = t0->secs[0].size;
+// The shape of the stored bytes. Every track's sectors must be of one size; every track the same shape, but with
+// m_ownTrack0 cylinder 0's tracks may share a shape of their own.
+bool Container::tracksLayout(RawLayout *out, QString *why) const {
+    const QString odd = "the image's tracks don't all have the same shape";
+    auto shapeOf = [this](int c, int h, int *n, int *size) {
+        const Track *t = track(c, h);
+        if (!t || t->secs.isEmpty()) return false;
+        *n = t->secs.size();
+        *size = t->secs[0].size;
+        for (const Sector &s : t->secs)
+            if (s.size != *size) return false;
+        return true;
+    };
+    const Track *first = track(0, 0);
+    if (!first || first->secs.isEmpty()) { if (why) *why = "the image has no first track"; return false; }
+    const bool own0 = m_ownTrack0 && m_cyls > 1;
+    int n = 0, size = 0, n0 = 0, size0 = 0;
+    if (!shapeOf(own0 ? 1 : 0, 0, &n, &size)) { if (why) *why = odd; return false; }
     for (int c = 0; c < m_cyls; ++c)
         for (int h = 0; h < m_heads; ++h) {
-            const Track *t = track(c, h);
-            if (!t || t->secs.size() != n) { if (why) *why = "the image's tracks don't all have the same shape"; return false; }
-            for (const Sector &s : t->secs)
-                if (s.size != size) { if (why) *why = "the image's tracks don't all have the same shape"; return false; }
+            int tn = 0, ts = 0;
+            if (!shapeOf(c, h, &tn, &ts)) { if (why) *why = odd; return false; }
+            if (c == 0 && own0) {
+                if (h == 0) { n0 = tn; size0 = ts; }
+                else if (tn != n0 || ts != size0) { if (why) *why = odd; return false; }
+            } else if (tn != n || ts != size) { if (why) *why = odd; return false; }
         }
-    *trackBytes = n * size;
-    *seclen = size;
+    RawLayout l;
+    l.seclen = size;
+    l.sectrk = n;
+    l.cyls = m_cyls;
+    l.heads = m_heads;
+    l.firstId = first->secs[first->byId.value(0)].r;
+    l.mode = first->mode;
+    if (own0 && (n0 != n || size0 != size)) {
+        l.t0sectrk = n0;
+        l.t0seclen = size0;
+    }
+    *out = l;
     return true;
+}
+
+bool Container::storedLayout(RawLayout *out, QString *why) const {
+    if (m_kind == Kind::None) { if (why) *why = "no image"; return false; }
+    if (m_kind == Kind::Raw) {
+        if (!m_layout.valid()) { if (why) *why = "the raw image has no layout yet"; return false; }
+        *out = m_layout;
+        return true;
+    }
+    return tracksLayout(out, why);
+}
+
+void Container::locateStored(const RawLayout &l, qint64 off, int *c, int *h, int *idx, int *at, int *seclen) {
+    const qint64 t0 = l.track0Bytes(), tb = l.trackBytes();
+    qint64 in = 0;
+    if (off < t0 * l.heads) {
+        *c = 0;
+        *h = int(off / t0);
+        in = off % t0;
+        *seclen = l.t0sectrk > 0 ? l.t0seclen : l.seclen;
+    } else {
+        const qint64 t = (off - t0 * l.heads) / tb;
+        *c = 1 + int(t / l.heads);
+        *h = int(t % l.heads);
+        in = (off - t0 * l.heads) % tb;
+        *seclen = l.seclen;
+    }
+    *idx = int(in / *seclen);
+    *at = int(in % *seclen);
+}
+
+qint64 Container::storedOffset(const RawLayout &l, int c, int h, int idx) {
+    return l.trackOffset(c, h) + qint64(idx) * (c == 0 && l.t0sectrk > 0 ? l.t0seclen : l.seclen);
 }
 
 qint64 Container::storedSize(QString *why) const {
     if (m_kind == Kind::None) { if (why) *why = "no image"; return 0; }
     if (m_kind == Kind::Raw) return qMax(m_rawFileSize, m_padSize);
-    int tb = 0, sl = 0;
-    if (!uniformTracks(&tb, &sl, why)) return 0;
-    return qint64(tb) * m_cyls * m_heads;
+    RawLayout l;
+    if (!tracksLayout(&l, why)) return 0;
+    return l.bytes();
 }
 
 bool Container::readStored(qint64 off, qint64 len, QByteArray *out, QString *err) const {
@@ -302,12 +361,12 @@ bool Container::readStored(qint64 off, qint64 len, QByteArray *out, QString *err
     if (off < 0 || len < 0) { *err = "bad position"; return false; }
     if (len == 0) return true;
     if (m_kind == Kind::Raw) { *out = rawRange(off, len); return true; }
-    int tb = 0, sl = 0;
-    if (!uniformTracks(&tb, &sl, err)) return false;
-    if (off + len > qint64(tb) * m_cyls * m_heads) { *err = "read beyond the end of the disc"; return false; }
+    RawLayout l;
+    if (!tracksLayout(&l, err)) return false;
+    if (off + len > l.bytes()) { *err = "read beyond the end of the disc"; return false; }
     while (len > 0) {
-        const qint64 t = off / tb, in = off % tb;
-        const int c = int(t / m_heads), h = int(t % m_heads), idx = int(in / sl), at = int(in % sl);
+        int c = 0, h = 0, idx = 0, at = 0, sl = 0;
+        locateStored(l, off, &c, &h, &idx, &at, &sl);
         QByteArray s;
         if (!read(c, h, idx, &s) || s.size() < sl) {
             *err = QString("cylinder %1 head %2 sector %3 can't be read").arg(c).arg(h).arg(idx);
@@ -325,13 +384,13 @@ bool Container::writeStored(qint64 off, const QByteArray &data, QString *err) {
     if (off < 0) { *err = "bad position"; return false; }
     if (data.isEmpty()) return true;
     if (m_kind == Kind::Raw) { stageRaw(off, data, false); return true; }
-    int tb = 0, sl = 0;
-    if (!uniformTracks(&tb, &sl, err)) return false;
+    RawLayout l;
+    if (!tracksLayout(&l, err)) return false;
     qint64 len = data.size(), pos = 0;
-    if (off + len > qint64(tb) * m_cyls * m_heads) { *err = "write beyond the end of the disc"; return false; }
+    if (off + len > l.bytes()) { *err = "write beyond the end of the disc"; return false; }
     while (len > 0) {
-        const qint64 t = off / tb, in = off % tb;
-        const int c = int(t / m_heads), h = int(t % m_heads), idx = int(in / sl), at = int(in % sl);
+        int c = 0, h = 0, idx = 0, at = 0, sl = 0;
+        locateStored(l, off, &c, &h, &idx, &at, &sl);
         const qint64 n = qMin<qint64>(len, sl - at);
         QByteArray s;
         if (n < sl && (!read(c, h, idx, &s) || s.size() < sl)) {
@@ -352,11 +411,11 @@ bool Container::storedTouched(qint64 off, qint64 len) const {
         auto it = m_blocks.lowerBound(off / RawBlock);
         return it != m_blocks.end() && it.key() * RawBlock < off + len;
     }
-    int tb = 0, sl = 0;
-    if (!uniformTracks(&tb, &sl, nullptr)) return !m_pending.isEmpty();
+    RawLayout l;
+    if (!tracksLayout(&l, nullptr)) return !m_pending.isEmpty();
     for (auto it = m_pending.begin(); it != m_pending.end(); ++it) {
         const int c = int(it.key() >> 16), h = int((it.key() >> 8) & 0xFF), i = int(it.key() & 0xFF);
-        const qint64 s = (qint64(c) * m_heads + h) * tb + qint64(i) * sl;
+        const qint64 s = storedOffset(l, c, h, i), sl = c == 0 && l.t0sectrk > 0 ? l.t0seclen : l.seclen;
         if (s < off + len && off < s + sl) return true;
     }
     return false;
@@ -368,11 +427,11 @@ void Container::discardStored(qint64 off, qint64 len) {
         for (qint64 b = (off + RawBlock - 1) / RawBlock; (b + 1) * RawBlock <= off + len; ++b) m_blocks.remove(b);
         return;
     }
-    int tb = 0, sl = 0;
-    if (!uniformTracks(&tb, &sl, nullptr)) return;
+    RawLayout l;
+    if (!tracksLayout(&l, nullptr)) return;
     for (auto it = m_pending.begin(); it != m_pending.end();) {
         const int c = int(it.key() >> 16), h = int((it.key() >> 8) & 0xFF), i = int(it.key() & 0xFF);
-        const qint64 s = (qint64(c) * m_heads + h) * tb + qint64(i) * sl;
+        const qint64 s = storedOffset(l, c, h, i), sl = c == 0 && l.t0sectrk > 0 ? l.t0seclen : l.seclen;
         if (s >= off && s + sl <= off + len) it = m_pending.erase(it);
         else ++it;
     }
@@ -494,7 +553,9 @@ Shape Container::shape() const {
 
 bool Container::writeRawFromTracks(QByteArray *out, QString *err) const {
     Shape sh = shape();
-    if (sh.oddTracks || sh.uniformTracks != m_cyls * m_heads || sh.badSectors) {
+    RawLayout sl;
+    const bool fits = m_ownTrack0 ? tracksLayout(&sl, nullptr) : !sh.oddTracks && sh.uniformTracks == m_cyls * m_heads;
+    if (!fits || sh.badSectors) {
         *err = "the disc has tracks of different shapes, missing tracks or bad sectors, which a raw image can't hold";
         return false;
     }
@@ -530,6 +591,7 @@ bool Container::serialize(Kind as, QByteArray *out, QString *err) const {
 bool Container::reopenAs(const QString &path, Kind as, const RawLayout &l, Container *out, QString *err) const {
     if (!out->open(path, err)) return false;
     if (out->kind() != as) { *err = "the file written does not read back as a " + kindName(as); return false; }
+    out->m_ownTrack0 = m_ownTrack0;
     if (as == Kind::Raw) {
         if (l.valid() && !out->setRawLayout(l, err)) return false;
         if (m_kind == Kind::Raw && !l.valid()) out->setRawPadding(m_padSize, m_padByte);
@@ -626,6 +688,8 @@ bool Container::saveAs(const QString &path, Kind as, QString *err, const std::fu
         l.t0sectrk = l.t0seclen = 0;
         l.sideBySide = false;
         if (!m_tracks.isEmpty()) l.mode = m_tracks[0].mode;
+        RawLayout stored;
+        if (m_ownTrack0 && tracksLayout(&stored, nullptr)) l = stored;     // track 0 at its own size
     }
     const RawLayout readBack = as == Kind::Raw ? l : RawLayout();
     Container fresh;
