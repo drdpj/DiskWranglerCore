@@ -71,6 +71,10 @@ struct Piece {
     Type type = Info;
     int first = 0, last = 0;                             // chunks [first, last] of the tape
     QByteArray bytes;                                    // Data
+    // Data: for each chunk of the run, first to last, how many of bytes came from it and the chunks before it (a chunk
+    // that only changes the coding adds none). chunkOf(i) is the chunk byte i came from.
+    QVector<int> ends;
+    int chunkOf(int byte) const;
     Coding coding;                                       // Data
     double seconds = 0;                                  // Tone and Gap: how long (a pilot inside a TZX data block isn't counted)
     bool stop = false;                                   // Gap: TZX 20 with 0, "stop the tape"

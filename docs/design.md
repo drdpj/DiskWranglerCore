@@ -936,3 +936,7 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    `tapetest` (every UEF chunk and TZX block kind, gzip, staging, saving; and real tapes given on its command line)
    and `tests/tape_check.py`, an independent reader written from the specifications that must print every tape
    exactly as `tapetest --dump` does; `clitest` and `uitest` for labels and order. `DW_CORE_VERSION` is 1.4.0.
+   Added while Acorn Disk Wrangler's `cfs-1` used it (still v1.4.0, on the same branch): `Piece::ends` and
+   `Piece::chunkOf(byte)` (which chunk each byte of a data run came from, so a program can say which chunks a file
+   is: a run may span several data chunks), and the text `ls` shows a labelled entry by its label (the owner's
+   answer: `ls` shows bare names; `clitest`'s order check moved to the JSON, where the names differ).

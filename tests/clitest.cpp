@@ -411,11 +411,14 @@ int main(int argc, char **argv) {
         dwcli({"put", t, d + "/l/a.txt", d + "/l/b.txt", d + "/l/c.txt", "/"});
         Run r = dwcli({"ls", t});
         const QStringList l = QString::fromUtf8(r.out).split('\n', Qt::SkipEmptyParts);
-        CHECK(r.exit == 0 && l.size() == 4 && l[1].startsWith("/C.TXT") && l[2].startsWith("/B.TXT") && l[3].startsWith("/A.TXT"),
-              "ls keeps the order the volume lists, not sorted: " + l.join(" | "));
+        CHECK(r.exit == 0 && l.size() == 4 && l[1].startsWith("/SAME ") && l[2].startsWith("/SAME ") && l[3].startsWith("/SAME "),
+              "ls shows each entry by its label: " + l.join(" | "));
+        CHECK(l.size() == 4 && l[1].contains(" 3  ") && l[3].contains(" 3  "), "  (each with its own size)");
         r = dwcli({"--json", "ls", t});
         const QJsonArray es = r.json["result"].toObject()["entries"].toArray();
         CHECK(es.size() == 3 && es[0].toObject()["label"] == "SAME" && es[0].toObject()["name"] == "C.TXT", "JSON: the label beside the name");
+        CHECK(es.size() == 3 && es[1].toObject()["name"] == "B.TXT" && es[2].toObject()["name"] == "A.TXT",
+              "ls keeps the order the volume lists, not sorted (JSON names: C.TXT, B.TXT, A.TXT)");
         r = dwcli({"--json", "ls", img});
         CHECK(!r.out.contains("\"label\""), "no label key where a volume gives none");
         const QString out = d + "/lout";

@@ -182,9 +182,12 @@ static void sample(const QString &path) {
     for (const Piece &p : ps) {
         if (p.first != covered) contiguous = false;
         covered = p.last + 1;
-        if (p.type == Piece::Data) ++data;
+        if (p.type == Piece::Data) {
+            ++data;
+            if (p.ends.size() != p.last - p.first + 1 || p.ends.last() != p.bytes.size()) contiguous = false;
+        }
     }
-    CHECK(contiguous && covered == t.chunks().size(), n + ": the pieces cover every chunk, in order");
+    CHECK(contiguous && covered == t.chunks().size(), n + ": the pieces cover every chunk, in order, and each data byte has its chunk");
     CHECK(data > 0, n + QString(": %1 data pieces").arg(data));
 }
 
@@ -291,6 +294,9 @@ int main(int argc, char **argv) {
                                  "info14-14 data15-16 data17-18 data19-19 info20-20 info21-21 info22-22",
               "the pieces: runs, modal chunks inside them, everything covered");
         CHECK(ps[3].bytes == "HELLO WORLD" && ps[3].coding.describe() == "8N1 1200 baud", "&0100 run: " + ps[3].coding.describe());
+        CHECK(ps[3].ends == QVector<int>({5, 11}) && ps[3].chunkOf(4) == 3 && ps[3].chunkOf(5) == 4 && ps[3].chunkOf(10) == 4,
+              "a run's bytes: which chunk each came from");
+        CHECK(ps[13].ends == QVector<int>({4, 4}) && ps[13].chunkOf(3) == 17, "a multiplexed copy adds no bytes to its run");
         CHECK(ps[5].bytes == "8E1" && ps[5].coding.parity == 'E' && ps[5].coding.baseHz == 1200, "&0104 8E1");
         CHECK(ps[6].bytes == "more" && ps[6].coding.baseHz == 1300, "a base frequency change starts a new run: " + ps[6].coding.describe());
         CHECK(ps[7].coding.dataBits == 7 && ps[7].coding.stopBits == 2 && ps[7].coding.extraWave, "&0104 7O2 with the extra wave: " + ps[7].coding.describe());

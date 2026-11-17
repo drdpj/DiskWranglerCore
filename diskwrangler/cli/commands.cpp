@@ -570,7 +570,9 @@ void emitEntry(const VolRef &r, const Path &dir, const fs::Entry &e, bool withVo
     if (r.v->caps().ordered) row.key << QString::number(out->block().rows.size()).rightJustified(10, '0');   // as listed
     else
         for (int i = 0; i < p.parts.size(); ++i) row.key << (users && i == 0 ? numberedKey(p.parts[i]) : p.parts[i].toLower());
-    row.name = (withVol ? r.name + ":" : QString()) + r.v->displayPath(p);
+    // a labelled entry (a tape's second GAME, named "GAME (2)") is listed by its label, as the window shows it; --json
+    // gives both
+    row.name = (withVol ? r.name + ":" : QString()) + r.v->displayPath(e.label.isEmpty() ? p : dir.child(e.label));
     row.type = e.isDir() ? "D" : "";
     row.attrs = attrSummary(r, e);
     for (const fs::AttrSpec &a : r.v->fileAttrs())

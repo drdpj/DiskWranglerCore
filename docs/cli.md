@@ -226,8 +226,9 @@ On failure `ok` is false, `exit` is the code and `error` is `{code, kind, messag
 null when the command touched no volume. `result` depends on the command (`info`: `container`, `app`, `verdict`,
 `candidates`, `volumes`; `ls`: `entries`; `script`: `lines`, each with its own `exit`, `changes` and `error`).
 An entry of `ls` has a `label` beside its `name` only where the volume gives one: a tape's files may share a name, so
-each has a unique `name` (`GAME`, `GAME (2)`; the one a path uses) and the shared one as its `label`. A volume whose
-order means something (a tape) is listed in that order, in text as in JSON, not sorted.
+each has a unique `name` (`GAME`, `GAME (2)`; the one a path uses) and the shared one as its `label`. The text
+listing shows the label (two lines `GAME`, as the window shows them); the JSON gives both. A volume whose order
+means something (a tape) is listed in that order, in text as in JSON, not sorted.
 A unix-style `get -` can't be combined with `--json`.
 
 ## Exit codes

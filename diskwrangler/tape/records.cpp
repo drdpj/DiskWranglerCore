@@ -83,12 +83,14 @@ QVector<Piece> uefPieces(const QVector<Chunk> &ch) {
         if (open && out.last().coding == c && out.last().problem.isEmpty() && problem.isEmpty()) {
             out.last().bytes += bytes;
             out.last().last = i;
+            out.last().ends.append(out.last().bytes.size());
             return;
         }
         Piece p;
         p.type = Piece::Data;
         p.first = p.last = i;
         p.bytes = bytes;
+        p.ends = {int(bytes.size())};
         p.coding = c;
         p.problem = problem;
         out.append(p);
@@ -104,7 +106,7 @@ QVector<Piece> uefPieces(const QVector<Chunk> &ch) {
         if (k.id == 0x0113 && b.size() >= 4) base = uef::getFloat(b, 0);
         else if (k.id == 0x0117 && b.size() >= 2) baud = int(le(b, 0, 2));
         if (isModal(k.id)) {
-            if (open) { out.last().last = i; continue; }
+            if (open) { out.last().last = i; out.last().ends.append(out.last().bytes.size()); continue; }
             Piece p;
             p.type = Piece::Info;
             p.first = p.last = i;
@@ -210,6 +212,7 @@ QVector<Piece> tzxPieces(Kind kind, const QVector<Chunk> &ch) {
             default: p.type = Piece::Info; break;
             }
         }
+        if (p.type == Piece::Data) p.ends = {int(p.bytes.size())};
         out.append(p);
     }
     return out;
@@ -239,6 +242,12 @@ QString Coding::describe() const {
         return QString("pulse width %1/%2 T-states, pause %3 ms").arg(zero).arg(one).arg(pauseMs);
     }
     return "none";
+}
+
+int Piece::chunkOf(int byte) const {
+    for (int k = 0; k < ends.size(); ++k)
+        if (byte < ends[k]) return first + k;
+    return last;
 }
 
 QString typeName(Piece::Type t) {
