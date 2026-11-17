@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.2.0)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.3.0)"), "--version: " + QString(r.out.trimmed()));
         r = dwcli({});
         CHECK(r.exit == 2, "no command: exit 2");
         r = dwcli({"frobnicate", img});
@@ -220,6 +220,8 @@ int main(int argc, char **argv) {
         CHECK(r.exit == 5, "new over a file: exit 5 (conflict)");
         r = dwcli({"new", img, "--format=pc720", "--replace"});
         CHECK(r.exit == 0, "new --replace");
+        r = dwcli({"new", img, "--format=pc720", "--replace", "--track0=padded"});
+        CHECK(r.exit == 2, "new --track0 on a tool without it: exit 2 (usage)");
         const QString dry = d + "/dry.img";
         r = dwcli({"--dry-run", "new", dry, "--format=pc720"});
         CHECK(r.exit == 0 && !QFileInfo::exists(dry), "new --dry-run writes nothing");

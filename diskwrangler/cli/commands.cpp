@@ -98,11 +98,12 @@ QVector<CmdDef> commandTable(const AppInfo &app) {
     t << CmdDef{"new", "FILE --format=ID [...]", "make a blank image",
                 keep({{"title", QChar(), true, false}, {"dosboot", QChar(), true, false}, {"container", QChar(), true, false},
                       {"stamps", QChar(), false, false}, {"label", QChar(), true, false}, {"separate-sides", QChar(), false, false},
-                      {"replace", QChar(), false, false}, {"list", QChar(), false, false}},
-                     {"title", "dosboot", "stamps", "label", "separate-sides"}), 0, 1};
+                      {"track0", QChar(), true, false}, {"replace", QChar(), false, false}, {"list", QChar(), false, false}},
+                     {"title", "dosboot", "stamps", "label", "separate-sides", "track0"}), 0, 1};
     t << CmdDef{"convert", "IMAGE [OUT] [--container=KIND] [--to-sides=ORDER]", "write the image in another container",
-                keep({{"container", QChar(), true, false}, {"to-sides", QChar(), true, false}, {"replace", QChar(), false, false}},
-                     {"to-sides"}), 0, 1};
+                keep({{"container", QChar(), true, false}, {"to-sides", QChar(), true, false}, {"track0", QChar(), true, false},
+                      {"replace", QChar(), false, false}},
+                     {"to-sides", "track0"}), 0, 1};
     t << CmdDef{"copy", "SRC DEST PATH... [--into=DIR] [--to-vol=NAME]", "copy between images",
                 {{"into", QChar(), true, false}, {"to-vol", QChar(), true, false}, {"replace", QChar(), false, false},
                  {"skip", QChar(), false, false}, {"letters", QChar(), true, false}, {"force", QChar(), false, false}}, 1, -1};
@@ -1145,6 +1146,8 @@ bool cmdNew(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
     n.label = p.value("label");
     n.stamps = p.has("stamps");
     n.separateSides = p.has("separate-sides");
+    n.track0 = p.value("track0");
+    if (!n.track0.isEmpty() && n.track0 != "own" && n.track0 != "padded") { c.fail(ExitUsage, "--track0 is own or padded"); return false; }
     if (!n.sides.isEmpty() && n.sides != "interleaved" && n.sides != "sequential") { c.fail(ExitUsage, "--sides for new is interleaved or sequential"); return false; }
     const QString file = pos[0];
     if (QFileInfo::exists(file) && !p.has("replace")) { c.fail(ExitConflict, QString("%1 exists: use --replace").arg(file), file); return false; }
@@ -1188,6 +1191,8 @@ bool cmdConvert(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
         return false;
     }
     if (o.container == "td0") { c.fail(ExitUnsupported, "TeleDisk files can be read but not written"); return false; }
+    o.track0 = p.value("track0");
+    if (!o.track0.isEmpty() && o.track0 != "own" && o.track0 != "padded") { c.fail(ExitUsage, "--track0 is own or padded"); return false; }
     if (!o.toSides.isEmpty() && o.toSides != "interleaved" && o.toSides != "sequential") { c.fail(ExitUsage, "--to-sides is interleaved or sequential"); return false; }
     QString err;
     int code = ExitFailed;

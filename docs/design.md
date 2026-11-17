@@ -896,3 +896,9 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    (open and close turn it off), so Acorn and CP/M Disk Wrangler are unchanged; commit and saveAs keep it, and the copy
    read back has it. CPC DSK has no field for FM, so a single-density track 0 in a DSK file reads back as MFM (the
    data unchanged). `devicetest` covers it; samdisk reads the files it writes. `DW_CORE_VERSION` is 1.2.0.
+4. **`--track0` for new and convert (core v1.3.0).** A raw image of a disc whose track 0 has a shape of its own is
+   kept two ways: track 0 at its own size (as Research Machines images are), or padded to a full track so that every
+   track is the same length (as some emulators and tools want). A program that offers the choice lists `"track0"` in
+   `AppInfo::options`; `new` and `convert` then take `--track0=own|padded` (`NewOptions::track0`,
+   `ConvertOptions::track0`; anything else is a usage error), and the program decides what each means. A program that
+   doesn't list it never sees the option (a usage error, as before). `clitest` checks that. `DW_CORE_VERSION` is 1.3.0.

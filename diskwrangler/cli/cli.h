@@ -41,7 +41,7 @@
 #include <diskwrangler/xfer/importer.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
-#define DW_CORE_VERSION "1.2.0"      // the core tag this source is; raise it with every tag
+#define DW_CORE_VERSION "1.3.0"      // the core tag this source is; raise it with every tag
 
 namespace dw {
 namespace cli {
@@ -71,12 +71,14 @@ struct OpenOptions {
 
 struct NewOptions {
     QString format, title, sides, container, dosboot, label;
+    QString track0;                      // --track0 (a raw image): "", "own" (track 0 at its own size), "padded"
     bool stamps = false, separateSides = false;
 };
 
 struct ConvertOptions {
     QString container;                   // "" = the image's own
     QString toSides;                     // "", "interleaved", "sequential"
+    QString track0;                      // --track0 (to a raw image): "", "own" (track 0 at its own size), "padded"
 };
 
 struct GetOptions {
@@ -167,7 +169,8 @@ struct AppInfo {
     app::AppInfo program;                // name "Acorn Disk Wrangler", version as Help > About shows it, ...
     Backend *backend = nullptr;
     // The options this tool has beyond the common ones: "sides", "diskdefs", "charset", "sidecars", "user-folders",
-    // "trim", "title", "dosboot", "container-new", "stamps", "label", "separate-sides", "to-sides", "format-open".
+    // "trim", "title", "dosboot", "container-new", "stamps", "label", "separate-sides", "to-sides", "format-open",
+    // "track0" (new and convert: a raw image's track 0 of its own shape at its own size, or padded to a full track).
     QStringList options;
 };
 
