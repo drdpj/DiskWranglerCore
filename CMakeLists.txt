@@ -42,10 +42,22 @@ add_library(diskwrangler-device STATIC
     diskwrangler/device/container.h
     diskwrangler/device/linear.h
     diskwrangler/device/safesave.h
-    diskwrangler/device/sideorder.h)
+    diskwrangler/device/sideorder.h
+    diskwrangler/device/staged.h)
 add_library(DiskWrangler::Device ALIAS diskwrangler-device)
 target_include_directories(diskwrangler-device PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(diskwrangler-device PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+
+# The tape module (QtCore only, optional): tape image files (UEF, TZX / CDT, TAP), gzip, and what their chunks mean.
+add_library(diskwrangler-tape STATIC
+    diskwrangler/tape/gzip.cpp
+    diskwrangler/tape/records.cpp
+    diskwrangler/tape/tapefile.cpp
+    diskwrangler/tape/gzip.h
+    diskwrangler/tape/records.h
+    diskwrangler/tape/tapefile.h)
+add_library(DiskWrangler::Tape ALIAS diskwrangler-tape)
+target_link_libraries(diskwrangler-tape PUBLIC DiskWrangler::Device)
 
 # The filesystem layer (QtCore only): Volume, Disc, detection by tiers, new-disc presets.
 add_library(diskwrangler-fs STATIC
@@ -165,6 +177,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_executable(importtest tests/importtest.cpp)
     target_link_libraries(importtest DiskWrangler::Xfer DiskWrangler::Dfs DiskWrangler::Fat)
     add_test(NAME importtest COMMAND importtest)
+    add_executable(tapetest tests/tapetest.cpp)
+    target_link_libraries(tapetest DiskWrangler::Tape DiskWrangler::Fs)
+    add_test(NAME tapetest COMMAND tapetest)
+    # The independent reader against tapetest, on the hand-made tapes (real ones: test-protocol.md, tape_check.py DIR).
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        add_test(NAME tapecheck COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/tape_check.py $<TARGET_FILE:tapetest>)
+    endif()
     add_executable(clitest tests/clitest.cpp)
     target_link_libraries(clitest DiskWrangler::Cli DiskWrangler::Fat)
     add_test(NAME clitest COMMAND clitest)

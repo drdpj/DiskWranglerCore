@@ -40,6 +40,7 @@
 #include <QVector>
 #include <functional>
 #include <memory>
+#include <diskwrangler/device/staged.h>
 
 class QFile;
 class QIODevice;
@@ -132,7 +133,7 @@ public:
     virtual bool write(int cyl, int head, int idx, const QByteArray &data, QString *err) = 0;
 };
 
-class Container : public Physical {
+class Container : public Physical, public Staged {
 public:
     // The staged writes, to put back after a failed change (Volume transactions).
     struct Snapshot {
@@ -222,8 +223,13 @@ public:
     bool read(int cyl, int head, int idx, QByteArray *out) const override;
     bool write(int cyl, int head, int idx, const QByteArray &data, QString *err) override;
 
-    bool hasPending() const { return !m_pending.isEmpty() || !m_blocks.isEmpty() || m_forceSave; }
-    void discardPending() { m_pending.clear(); m_blocks.clear(); m_forceSave = false; m_rawEnd = 0; }
+    bool hasPending() const override { return !m_pending.isEmpty() || !m_blocks.isEmpty() || m_forceSave; }
+    void discardPending() override { m_pending.clear(); m_blocks.clear(); m_forceSave = false; m_rawEnd = 0; }
+    // Staged: the same as snapshot() / restore(), for fs::Disc.
+    std::shared_ptr<const void> stagedState() const override { return std::make_shared<Snapshot>(snapshot()); }
+    void restoreStaged(const std::shared_ptr<const void> &s) override {
+        if (const Snapshot *x = static_cast<const Snapshot *>(s.get())) restore(*x);
+    }
     Snapshot snapshot() const { return Snapshot{m_pending, m_blocks, m_forceSave, m_rawEnd}; }
     void restore(const Snapshot &s) { m_pending = s.sectors; m_blocks = s.blocks; m_forceSave = s.forceSave; m_rawEnd = s.rawEnd; }
     void markForSave() { m_forceSave = true; }

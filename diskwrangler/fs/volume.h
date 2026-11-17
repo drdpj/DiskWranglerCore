@@ -62,7 +62,11 @@ enum class NodeKind { File, Dir, Namespace };
 typedef QVariantMap AttrValues;          // keyed by AttrSpec::key
 
 struct Entry {
-    QString name;
+    QString name;                        // the last part of its Path: unique in its directory
+    // What to show for it, when that differs from name: a tape's files may share a name, so the second GAME on a
+    // tape is named "GAME (2)" and labelled "GAME". The window and ls show the label, a copy carries it as the
+    // file's name (and name as its host name, so two such files dragged out don't overwrite each other). Empty: name.
+    QString label;
     NodeKind kind = NodeKind::File;
     qint64 size = 0;
     bool sizeExact = true;               // false: the filesystem only knows it to a record (CP/M 2.2)
@@ -70,6 +74,7 @@ struct Entry {
     AttrValues attrs;
     QString problem;                     // something wrong with it: shown, and the entry is read-only
     bool isDir() const { return kind != NodeKind::File; }
+    QString shown() const { return label.isEmpty() ? name : label; }
 };
 
 // One attribute of a file (or of the volume). It drives columns, the Properties dialog and retro-files.
@@ -96,6 +101,7 @@ struct Caps {
     bool dates = false, settableDates = false;
     bool contiguousOnly = false;         // a file needs one free run (DFS)
     int maxEntriesPerDir = -1;           // DFS 31 or 62, ADFS 47, CP/M the directory size; -1 = no fixed limit
+    bool ordered = false;                // list() order means something (a tape's files): shown as listed, never sorted
 };
 
 struct VolumeInfo {

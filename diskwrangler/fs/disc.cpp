@@ -33,11 +33,11 @@ bool Disc::reloadAll(QString *err) {
 }
 
 bool Disc::transact(const std::function<bool(QString *)> &f, QString *err) {
-    if (!m_c) { *err = "no disc"; return false; }
-    const device::Container::Snapshot before = m_c->snapshot();
+    if (!m_s) { *err = "no disc"; return false; }
+    const std::shared_ptr<const void> before = m_s->stagedState();
     QString e;
     if (f(&e)) return true;
-    m_c->restore(before);
+    m_s->restoreStaged(before);
     QString re;
     if (!reloadAll(&re)) e += " (and reading the disc again failed: " + re + ")";
     *err = e;
@@ -78,9 +78,19 @@ bool Disc::commit(device::Container::SaveOptions o, QString *err) {
     return ok;
 }
 
+bool Disc::commitWith(const std::function<bool(QString *)> &save, QString *err) {
+    if (!m_s) { *err = "no disc"; return false; }
+    const Report r = validateAll();
+    if (!r.ok()) { *err = "The disc failed its check, so NOTHING was written.\n\n" + r.errors.join("\n"); return false; }
+    const bool ok = save(err);
+    QString re;
+    if (!reloadAll(&re) && ok) { *err = "saved, but reading the disc again failed: " + re; return false; }
+    return ok;
+}
+
 void Disc::revert() {
-    if (!m_c) return;
-    m_c->discardPending();
+    if (!m_s) return;
+    m_s->discardPending();
     reloadAll(nullptr);
 }
 

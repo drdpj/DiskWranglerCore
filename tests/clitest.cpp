@@ -64,6 +64,19 @@ public:
     using OddVolume::OddVolume;
     bool marksInexactSizes() const override { return false; }
 };
+// As a tape lists its files: in an order that means something (here the reverse of FAT's), and every file labelled
+// with a name it shares ("SAME"), each told apart by its own name.
+class LabelVolume : public fat::FsVolume {
+public:
+    using fat::FsVolume::FsVolume;
+    fs::Caps caps() const override { fs::Caps c = fat::FsVolume::caps(); c.ordered = true; return c; }
+    bool list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const override {
+        if (!fat::FsVolume::list(dir, out, err)) return false;
+        std::sort(out->begin(), out->end(), [](const fs::Entry &a, const fs::Entry &b) { return a.name > b.name; });
+        for (fs::Entry &e : *out) if (!e.isDir()) e.label = "SAME";
+        return true;
+    }
+};
 
 // The image's behaviour is chosen by the second suffix of its file name: x.odd.img, x.ro.img (the mount is read-only),
 // x.whole.img (the whole image is, with a reason that says what to do), x.sdet.img / x.sasm.img / x.sfor.img (a
@@ -83,7 +96,8 @@ public:
         fv = std::make_shared<fat::Volume>();
         if (!fv->attach(lin.get(), 0, quint32(c.rawFileSize()), err)) return false;
         d.setContainer(&c);
-        std::shared_ptr<fs::Volume> vol = mode == "recsize" ? std::make_shared<PlainSizeVolume>(fv) : mode == "odd" ? std::make_shared<OddVolume>(fv) : std::make_shared<fat::FsVolume>(fv);
+        std::shared_ptr<fs::Volume> vol = mode == "recsize" ? std::make_shared<PlainSizeVolume>(fv) : mode == "odd" ? std::make_shared<OddVolume>(fv)
+                                        : mode == "label" ? std::make_shared<LabelVolume>(fv) : std::make_shared<fat::FsVolume>(fv);
         const bool ro = mode == "ro" || mode == "whole" || mode == "cpm";
         d.addMount({"DOS", vol, ro, mode == "ro" ? QString("reason of the volume") : ro ? readOnlyWhy() : QString()});
         return true;
@@ -203,7 +217,7 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.3.0)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.4.0)"), "--version: " + QString(r.out.trimmed()));
         r = dwcli({});
         CHECK(r.exit == 2, "no command: exit 2");
         r = dwcli({"frobnicate", img});
@@ -384,6 +398,32 @@ int main(int argc, char **argv) {
         const QJsonArray en = r.json["result"].toObject()["entries"].toArray();
         CHECK(en.size() == 4 && en[0].toObject()["display"] == "/DIR" && en[3].toObject()["display"] == "/A.TXT",
               "odd: the JSON keeps the order the volume lists them in");
+    }
+
+    printf("ordered volumes and labels (a tape's files)\n");
+    {
+        const QString t = d + "/x.label.img";
+        QDir().mkpath(d + "/l");
+        spit(d + "/l/a.txt", "aaa");
+        spit(d + "/l/b.txt", "bbb");
+        spit(d + "/l/c.txt", "ccc");
+        dwcli({"new", t, "--format=pc720"});
+        dwcli({"put", t, d + "/l/a.txt", d + "/l/b.txt", d + "/l/c.txt", "/"});
+        Run r = dwcli({"ls", t});
+        const QStringList l = QString::fromUtf8(r.out).split('\n', Qt::SkipEmptyParts);
+        CHECK(r.exit == 0 && l.size() == 4 && l[1].startsWith("/C.TXT") && l[2].startsWith("/B.TXT") && l[3].startsWith("/A.TXT"),
+              "ls keeps the order the volume lists, not sorted: " + l.join(" | "));
+        r = dwcli({"--json", "ls", t});
+        const QJsonArray es = r.json["result"].toObject()["entries"].toArray();
+        CHECK(es.size() == 3 && es[0].toObject()["label"] == "SAME" && es[0].toObject()["name"] == "C.TXT", "JSON: the label beside the name");
+        r = dwcli({"--json", "ls", img});
+        CHECK(!r.out.contains("\"label\""), "no label key where a volume gives none");
+        const QString out = d + "/lout";
+        QDir().mkpath(out);
+        r = dwcli({"get", t, "/", out});
+        QStringList got = QDir(out).entryList(QDir::Files, QDir::Name);
+        CHECK(r.exit == 0 && got == QStringList({"A.TXT", "B.TXT", "C.TXT"}) && slurp(out + "/B.TXT") == "bbb",
+              "get: three files called SAME arrive under their own names: " + got.join(","));
     }
 
     printf("text output: info\n");

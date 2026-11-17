@@ -22,7 +22,8 @@ HEADERS += $$PWD/diskwrangler/app/clock.h \
            $$PWD/diskwrangler/device/container.h \
            $$PWD/diskwrangler/device/linear.h \
            $$PWD/diskwrangler/device/safesave.h \
-           $$PWD/diskwrangler/device/sideorder.h
+           $$PWD/diskwrangler/device/sideorder.h \
+           $$PWD/diskwrangler/device/staged.h
 SOURCES += $$PWD/diskwrangler/app/clock.cpp \
            $$PWD/diskwrangler/device/container.cpp \
            $$PWD/diskwrangler/device/container_formats.cpp \

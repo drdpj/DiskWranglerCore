@@ -18,7 +18,8 @@
 #pragma once
 
 // A Disc is an opened image: one container and the volumes mounted on it (ADFS and the DOS Plus partition inside
-// it; DFS side 0 and side 2; one CP/M volume, or one per side). QtCore only.
+// it; DFS side 0 and side 2; one CP/M volume, or one per side). QtCore only. It can stand on something else whose
+// changes are staged (device::Staged): a tape image (tape::TapeFile), which has no container (setStaged).
 //
 // Every change to any volume is staged in the container, so a transaction is simply: take the container's
 // snapshot, run the change, and if it fails put the snapshot back and have every volume reload what it caches.
@@ -30,6 +31,7 @@
 #include <memory>
 
 #include <diskwrangler/device/container.h>
+#include <diskwrangler/device/staged.h>
 #include <diskwrangler/fs/volume.h>
 
 namespace dw {
@@ -54,9 +56,12 @@ public:
     };
 
     // The container must outlive the Disc. (An app's image class may own it: Acorn's Adfs::Image does.)
-    explicit Disc(device::Container *c = nullptr) : m_c(c) {}
-    device::Container *container() const { return m_c; }
-    void setContainer(device::Container *c) { m_c = c; }
+    explicit Disc(device::Container *c = nullptr) : m_c(c), m_s(c) {}
+    device::Container *container() const { return m_c; }          // nullptr for a tape
+    void setContainer(device::Container *c) { m_c = c; m_s = c; }
+    // What the transactions take and put back: the container, or a tape image (which must outlive the Disc).
+    device::Staged *staged() const { return m_s; }
+    void setStaged(device::Staged *s) { m_c = nullptr; m_s = s; }
 
     QVector<Mount> &mounts() { return m_mounts; }
     const QVector<Mount> &mounts() const { return m_mounts; }
@@ -77,13 +82,17 @@ public:
     // Saves: validateAll() (as SaveOptions::validate, before anything else), then the container's checked save.
     // o.validate and o.verify are kept and run as well. Every volume reloads afterwards.
     bool commit(device::Container::SaveOptions o, QString *err);
-    bool dirty() const { return m_c && m_c->hasPending(); }
+    // The same for a disc on something other than a container (a tape): validateAll(), refusing the save on an error
+    // as commit() does, then save (the program's checked save of its tape), then every volume reloads.
+    bool commitWith(const std::function<bool(QString *err)> &save, QString *err);
+    bool dirty() const { return m_s && m_s->hasPending(); }
     void revert();                       // drops the staged writes; every volume reloads
 
 private:
     Report validate(bool touchedOnly, QVector<Report> *perMount) const;
     bool reloadAll(QString *err);
     device::Container *m_c = nullptr;
+    device::Staged *m_s = nullptr;                   // m_c, or a tape
     QVector<Mount> m_mounts;
 };
 

@@ -73,6 +73,7 @@ public:
     const dw::fs::NameRules &names() const override { return m_names; }
     dw::fs::VolumeInfo info() const override { dw::fs::VolumeInfo i; i.total = m_size; i.title = m_title; return i; }
     QString title() const { return m_title; }
+    QMap<QString, QString> labels;       // path -> the label list() gives it (as a tape's files share names)
 
     bool list(const dw::fs::Path &dir, QVector<dw::fs::Entry> *out, QString *err) const override {
         out->clear();
@@ -85,6 +86,7 @@ public:
             e.kind = it->dir ? dw::fs::NodeKind::Dir : dw::fs::NodeKind::File;
             e.size = it->data.size();
             e.attrs = {{"locked", it->locked}};
+            e.label = labels.value(it.key());
             out->append(e);
         }
         return true;

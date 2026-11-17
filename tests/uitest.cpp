@@ -682,6 +682,15 @@ static void kitTests() {
         CHECK(w.exportItems({Item(0, Path({"d"}))}, &out, &err) && out.size() == 1 && out[0].isDir && out[0].name == "d" &&
                   out[0].kids.size() == 1 && out[0].kids[0].name == "in.txt" && out[0].kids[0].data == "in",
               "exportItems: a folder is an item with what is in it");
+        doc.vol(0)->labels["d/in.txt"] = "SAME";
+        w.refresh();
+        CHECK(w.pane("one")->findRow(0, Path({"d", "in.txt"})) && w.pane("one")->findRow(0, Path({"d", "in.txt"}))->text(0) == "SAME",
+              "a labelled entry's row shows its label, and is found by its name");
+        CHECK(w.exportItems({Item(0, Path({"d", "in.txt"}))}, &out, &err) && out.size() == 1 && out[0].name == "SAME" &&
+                  out[0].hostName == "in.txt" && out[0].data == "in",
+              "exportItems: a labelled entry goes as its label, with its own name for the host");
+        doc.vol(0)->labels.clear();
+        w.refresh();
 
         t->setCurrentWidget(two);
         two->clearSelection();

@@ -307,8 +307,9 @@ Change makeChange(const QString &op, const VolRef &r, const QString &path, const
 bool exportItem(Ctx &c, const VolRef &r, const Path &dir, const fs::Entry &e, TransferItem *out) {
     const Path p = dir.child(e.name);
     TransferItem t;
-    t.name = e.name;
+    t.name = e.shown();
     t.hostName = r.v->hostNameFor(e);
+    if (t.hostName.isEmpty() && e.shown() != e.name) t.hostName = e.name;     // "GAME (2)": two GAMEs don't collide
     t.isDir = e.isDir();
     t.when = e.modified;
     t.attrs = r.v->toRetroIn(dir, e);
@@ -566,7 +567,9 @@ void emitEntry(const VolRef &r, const Path &dir, const fs::Entry &e, bool withVo
     const Path p = dir.child(e.name);
     const bool users = r.v->caps().namespaces;
     LsRow row;
-    for (int i = 0; i < p.parts.size(); ++i) row.key << (users && i == 0 ? numberedKey(p.parts[i]) : p.parts[i].toLower());
+    if (r.v->caps().ordered) row.key << QString::number(out->block().rows.size()).rightJustified(10, '0');   // as listed
+    else
+        for (int i = 0; i < p.parts.size(); ++i) row.key << (users && i == 0 ? numberedKey(p.parts[i]) : p.parts[i].toLower());
     row.name = (withVol ? r.name + ":" : QString()) + r.v->displayPath(p);
     row.type = e.isDir() ? "D" : "";
     row.attrs = attrSummary(r, e);

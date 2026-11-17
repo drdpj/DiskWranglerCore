@@ -244,7 +244,7 @@ QString DiscWindow::rootLabel(int mount) const {
 }
 
 void DiscWindow::decorateRow(QTreeWidgetItem *row, int, const fs::Path &, const fs::Entry *entry) const {
-    if (entry) row->setText(0, entry->name);
+    if (entry) row->setText(0, entry->shown());
 }
 
 // Each group's tab shown or not, and its text, as the program says now; a tab goes back in its place in the order.
@@ -589,8 +589,9 @@ bool DiscWindow::exportItems(const QVector<Item> &items, QVector<TransferItem> *
 
 bool DiscWindow::exportEntry(const fs::Volume *v, const fs::Path &path, const fs::Entry &e, TransferItem *t, QString *err,
                              int depth) const {
-    t->name = e.name;
+    t->name = e.shown();
     t->hostName = v->hostNameFor(e);
+    if (t->hostName.isEmpty() && e.shown() != e.name) t->hostName = e.name;   // "GAME (2)": two GAMEs don't collide
     t->when = e.modified;
     t->attrs = v->toRetroIn(path.parent(), e);
     t->sourceFs = v->fsId();

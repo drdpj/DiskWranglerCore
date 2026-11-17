@@ -252,6 +252,17 @@ The program id names its settings, its desktop file and its drag folders (`xfer:
 The tests reach a window through the kit too (`document()`, `pane(group)`, `openFile`, `DiscWindow::all()`); set
 `DiscWindow::autoAnswer` so that questions take their first answer and messages go to the status line.
 
+## Tapes
+
+A program whose machine saved to cassette can open tape images with the tape module (`diskwrangler-tape.pri`,
+`DiskWrangler::Tape`; see the headers in `diskwrangler/tape/`). `tape::TapeFile` is the file (UEF, TZX / CDT, TAP),
+its chunks kept exactly, changes staged; `tape::pieces()` reads it as tones, gaps and data with their codings; the
+encoders in `records.h` make chunks back. The program writes only its machine's part: how its files sit in the data
+(Acorn's cassette filing system blocks, the Spectrum's header and data blocks), as a `Volume` over a `Disc` whose
+staging is the tape (`Disc::setStaged`; `Disc::commitWith` saves it after the volumes' checks). A tape's files may
+share names: give each a unique `Entry::name` and the shared one as its `label`; set `Caps::ordered` so the list
+keeps the tape's order.
+
 ## The console program
 
 A few lines (`src/cli/main.cpp` in either program): fill a `dw::cli::AppInfo` (the tool's name, the program's

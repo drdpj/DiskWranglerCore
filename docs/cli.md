@@ -117,7 +117,8 @@ Without `-R`, `ls` lists only the named directory, or the root when no path is g
 it, depth first, each directory followed by its contents. `-d` shows the named node itself.
 
 Entries are sorted by name, ignoring case, with directories and files mixed (as `*CAT` does); on CP/M by user number,
-then name. Under `-R` the sort applies within each directory. JSON keeps the order in which the volume lists them.
+then name; on a tape (a volume whose order means something) in the tape's order, unsorted. Under `-R` the sort applies
+within each directory. JSON keeps the order in which the volume lists them.
 
 Example of the CP/M layout (illustrative):
 
@@ -224,6 +225,9 @@ set to it (`dw::now`). Host file dates are the files' own.
 On failure `ok` is false, `exit` is the code and `error` is `{code, kind, message, path}` (`kind` is the name below). `vol` is
 null when the command touched no volume. `result` depends on the command (`info`: `container`, `app`, `verdict`,
 `candidates`, `volumes`; `ls`: `entries`; `script`: `lines`, each with its own `exit`, `changes` and `error`).
+An entry of `ls` has a `label` beside its `name` only where the volume gives one: a tape's files may share a name, so
+each has a unique `name` (`GAME`, `GAME (2)`; the one a path uses) and the shared one as its `label`. A volume whose
+order means something (a tape) is listed in that order, in text as in JSON, not sorted.
 A unix-style `get -` can't be combined with `--json`.
 
 ## Exit codes

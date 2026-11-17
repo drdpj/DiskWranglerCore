@@ -119,6 +119,7 @@ QJsonObject entryJson(const fs::Volume &v, const fs::Path &dir, const fs::Entry 
     const fs::Path p = dir.child(e.name);
     QJsonObject o;
     o["name"] = e.name;
+    if (!e.label.isEmpty()) o["label"] = e.label;            // only a volume that labels its entries (a tape)
     o["path"] = QJsonArray::fromStringList(p.parts);
     o["display"] = v.displayPath(p);
     o["kind"] = kinds[int(e.kind)];

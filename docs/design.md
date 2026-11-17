@@ -902,3 +902,37 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    `AppInfo::options`; `new` and `convert` then take `--track0=own|padded` (`NewOptions::track0`,
    `ConvertOptions::track0`; anything else is a usage error), and the program decides what each means. A program that
    doesn't list it never sees the option (a usage error, as before). `clitest` checks that. `DW_CORE_VERSION` is 1.3.0.
+5. **Tape images (series `tape-1`, core v1.4.0).** A new optional module, `diskwrangler/tape/` (QtCore only;
+   `diskwrangler-tape.pri`, `DiskWrangler::Tape`), so that programs can take files off cassette tape images and put
+   them back, as Acorn Disk Wrangler will for the BBC Micro and Electron (owner: "get the mechanics to support the
+   kansas city type tape formats into the core ... the actual beeb specific stuff should end up in Acorn Disk
+   Wrangler"). Three layers, the module holding the first two:
+   - **The file** (`tapefile.h`, `TapeFile`): UEF (gzip or not), TZX and CDT (the same format), the Spectrum's TAP,
+     read into a list of chunks with every byte kept (unknown chunks too), written back byte for byte when unchanged.
+     A damaged end is kept as it was and makes the tape read-only. Changes are a new list of chunks
+     (`replaceChunks`), staged until `commit` / `saveAs` (the same checked save as a disc: temporary file, read back
+     and compared, `verify`, `.bak`, rename). In a TZX file the blocks that point at others by a count (23, 26, 28) are
+     corrected for blocks added or removed, and a change that would split or alter a loop is refused.
+     gzip (`gzip.h`): QtCore can compress (`qCompress`) but not read gzip, so the inflater is the core's own, from
+     RFC 1951 (its Huffman decoding follows the method of Mark Adler's puff.c, credited in the file and in the
+     programs' notices); writing wraps `qCompress`'s deflate data. No new build dependency.
+   - **The signal** (`records.h`, `pieces()`): the chunks as tones, gaps, data and the rest, each data run with its
+     coding: serial (UEF: start and stop bits, Kansas City / CUTS at 1200 / 2400 Hz) or pulse width (TZX, CDT, TAP:
+     Spectrum, CPC and the rest, T-states at 3.5 MHz); and the encoders that make chunks back from data. No machine's
+     files: a program finds those in the data pieces.
+   - **The machine** (the program's): Acorn's cassette filing system blocks in Acorn Disk Wrangler. The Spectrum's and
+     the Amstrad CPC's are parked (owner, 17 Nov 2026) but have what they need here.
+   Specification points settled on the way (each noted where it is used): UEF `&0112`'s gap is n / (2 * base)
+   seconds (the text's 1/(2n * base) gives microseconds for the 600 and 2000 real tapes hold); `&0114`'s worked
+   example contradicts its text (the text is followed; only a tone's length depends on it); TZX `CHAR[10]` is hex
+   (block 35's name is 16 characters); TZX 16 and 17 (C64) give the whole block's length; an unknown TZX block is
+   read by the extension rule. `&0102` (explicit bits) is read as the specification's formula; no sample has one.
+   Three changes outside the module, all additions: `device::Staged` (`staged.h`), which `Container` implements and
+   `fs::Disc` now runs its transactions over (`setStaged` for a tape; `commitWith` saves one after the same checks);
+   `fs::Entry::label` (what to show when it differs from the entry's unique name: two files on a tape may share a
+   name, so the second is named `GAME (2)` and labelled `GAME`; the window, `ls` and a copy use the label, and a copy
+   takes the name as its host name, so the two don't overwrite each other) and `Caps::ordered` (a list whose order
+   means something: `ls` keeps it instead of sorting). Nothing changes for a volume that sets neither. Tests:
+   `tapetest` (every UEF chunk and TZX block kind, gzip, staging, saving; and real tapes given on its command line)
+   and `tests/tape_check.py`, an independent reader written from the specifications that must print every tape
+   exactly as `tapetest --dump` does; `clitest` and `uitest` for labels and order. `DW_CORE_VERSION` is 1.4.0.

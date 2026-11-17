@@ -148,7 +148,7 @@ void VolumePane::addChildren(QTreeWidgetItem *parent, int mount, const fs::Path 
         const fs::Path p = dir.child(e.name);
         auto *it = new QTreeWidgetItem(parent);
         setKitRoles(it, mount, p, int(e.kind));
-        it->setText(0, e.name);
+        it->setText(0, e.shown());
         m_host->decorateRow(it, mount, p, &e);
         if (!e.isDir()) continue;
         if (m_host->listChildren(mount, p, p.parts.size())) addChildren(it, mount, p);
