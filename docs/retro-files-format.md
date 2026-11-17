@@ -6,9 +6,9 @@ A small, open convention for drag-and-drop (and clipboard) between tools that ed
 that a file dragged out of one tool and into another keeps the attributes a plain host file can't hold:
 load/exec addresses, access bits, a DFS directory letter, DOS attribute bits, CP/M user numbers, and so on.
 
-Acorn Disk Wrangler produces and accepts it. Nothing else is required to understand it: a drag always carries
-ordinary files as well (see *How a drag is put together*), so any program that accepts dropped files works,
-and a program that knows this format just gets more.
+Acorn Disk Wrangler, CP/M Disk Wrangler and FLEX Disk Wrangler produce and accept it. Nothing else is required to
+understand it: a drag always carries ordinary files as well (see *How a drag is put together*), so any program that
+accepts dropped files works, and a program that knows this format just gets more.
 
 ## Why this format is needed
 
@@ -120,7 +120,7 @@ The same for two files dragged from a DFS disc (`"filesystem": "dfs"`). They hav
 | `format` | yes | always `"retro-files"` |
 | `version` | yes | `1`. A receiver that finds a higher number should ignore the JSON and use the plain files. Version 1 receivers ignore keys they don't know, so new optional keys don't need a new version. |
 | `generator` | no | the sending program, for information |
-| `source.filesystem` | yes | the filesystem the items came from: `"adfs"`, `"dfs"`, `"fat"` (PC and Acorn DOS Plus), `"cpm"` (CP/M Disk Wrangler), or another short lower-case name. A receiver uses it to interpret `name` and to decide how to convert. |
+| `source.filesystem` | yes | the filesystem the items came from: `"adfs"`, `"dfs"`, `"fat"` (PC and Acorn DOS Plus), `"cpm"` (CP/M Disk Wrangler), `"flex"` and `"uniflex"` (FLEX Disk Wrangler), or another short lower-case name. A receiver uses it to interpret `name` and to decide how to convert. |
 | `source.image` | no | file name of the disc image, for information |
 | `base` | yes | `file:` URL of the base folder. Item paths are relative to it. |
 | `items` | yes | every file and directory in the drag, **parents before their contents** |
@@ -292,6 +292,46 @@ disc keeps them.
 * A sender of another filesystem that wants a file to land in a particular user number can add a `cpm`
   namespace to the item: a receiver uses the namespaces it knows and ignores the rest.
 
+### `flex` - FLEX file attributes (produced by FLEX Disk Wrangler)
+
+TSC FLEX (6800 FLEX 2, 6809 FLEX 9). Files only: FLEX has one directory per disc.
+
+| Key | Meaning |
+|---|---|
+| `writeProtect` | boolean, FLEX's write protection (directory attribute `$80`) |
+| `deleteProtect` | boolean, delete protection (`$40`) |
+| `readProtect` | boolean, read protection (`$20`) |
+| `catalogProtect` | boolean, catalogue protection (`$10`): `CAT` doesn't list the file |
+| `random` | boolean, a random-access file. The data is the file's data sectors without FLEX's two sector-map sectors; a receiver that writes FLEX discs makes a new map (FLEX Disk Wrangler does, from the sectors the file gets, as FLEX does) |
+
+`name` is the name as stored, upper case, `NAME.EXT` (1-8 characters, a dot, up to 3; letters, digits, `-` and
+`_`, starting with a letter); the host file's name is lower-cased. `modified` is the FLEX date (day precision, at
+midnight). The data is the file as stored on the disc: the data bytes of each of its sectors in chain order. A FLEX
+sector is 256 bytes, of which the first 4 are the link to the next sector and the record number, so each sector
+carries 252 bytes of data and `size` is always a multiple of 252. A text file keeps FLEX's CR line ends, TAB + count
+space compression and NUL padding.
+
+### `uniflex` - UniFLEX file attributes (produced by FLEX Disk Wrangler)
+
+TSC UniFLEX, the multi-user system for the same 6809 machines. Every key is on files and directories alike. The bits
+are an fdn's access byte (FLEX Disk Wrangler's `docs/uniflex-format.md`).
+
+| Key | Meaning |
+|---|---|
+| `ownerRead` | boolean, the owner may read it (`$01`) |
+| `ownerWrite` | boolean, the owner may write it (`$02`) |
+| `ownerExecute` | boolean, the owner may run it, or search it if a directory (`$04`) |
+| `othersRead` | boolean, everyone else may read it (`$08`) |
+| `othersWrite` | boolean, everyone else may write it (`$10`) |
+| `othersExecute` | boolean, everyone else may run it (`$20`) |
+| `setUserId` | boolean, it runs with its owner's user id (`$40`) |
+| `owner` | number, the owner's user id (0-65535) |
+
+`name` is the name's bytes as characters (Latin-1, case kept, 1-14 bytes). `modified` is the fdn's time of last
+change, to the second (UniFLEX keeps seconds since 1980 in GMT). The data is the file's bytes, exactly its size;
+blocks UniFLEX never wrote come out as zeros. Text files keep UniFLEX's CR line ends and their TABs. A directory
+travels as a directory with its contents. A device file travels as an empty file (its device numbers don't travel).
+
 New namespaces should be short, lower-case and named after the filesystem or machine family. Please add them
 here.
 
@@ -311,10 +351,27 @@ here.
   (new files get the current time, as for any other copy).
 * Otherwise, plain files: imported as files from the host, reading `.inf` sidecars if that option is on.
 
+## What FLEX Disk Wrangler does with a drop
+
+* From one of its own windows in the same process: copies directly, with the same attributes as the JSON below;
+  within one UniFLEX disc's tree, a drag moves the items into the directory dropped on instead.
+* A drop with this JSON, or plain files:
+  * On a **FLEX** disc: the file gets the item's date (today's when it has none) and the four `flex` protection keys,
+    as FLEX's `COPY` carries them; a `random` file becomes random-access with a new sector map. `name` is kept if it
+    is a valid FLEX name (upper-cased), otherwise turned into one (cut to 8 and 3 characters; characters FLEX
+    doesn't allow are dropped, spaces and dots become `_`; an `F` in front if it doesn't start with a letter).
+    Directories are flattened: FLEX has one. Other namespaces aren't converted.
+  * On a **UniFLEX** disc, into the directory dropped on (or the one selected): a file gets the `uniflex` access bits
+    and owner the item brings; keys left out give owner 0 and `rw-rw-`, as UniFLEX's shell makes a file. Its date is
+    not kept: UniFLEX gives a file the time it is written. A directory becomes a directory. `name` is kept, cut to
+    14 bytes; `/`, NUL and characters beyond Latin-1 become `_`.
+
 ## History
 
 * Version 1 (2026): first version, Acorn Disk Wrangler. The `cpm` namespace was settled with CP/M Disk Wrangler,
   which produces it (adding the optional `f1`-`f4` keys); no change of version was needed.
 * The clipboard (Copy / Paste) carries the same document; no change of version was needed.
+* The `flex` and `uniflex` namespaces (FLEX Disk Wrangler, 2026), kept in that program's docs until they moved here;
+  no change of version was needed.
 * National variants of ASCII (CP/M Disk Wrangler, 2026): `name` stays the disc's bytes; clarified above, no
   change of version was needed.
