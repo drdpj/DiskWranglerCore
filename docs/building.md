@@ -1,9 +1,10 @@
 # Building and releasing
 
-This file is part of [DiskWranglerCore](https://github.com/drdpj/DiskWranglerCore) and covers both
-[Acorn Disk Wrangler](https://github.com/drdpj/AcornDiskWrangler) and
-[CP/M Disk Wrangler](https://github.com/drdpj/CPMDiskWrangler). Below, `<app>` is `acorndiskwrangler` or
-`cpmdiskwrangler`.
+This file is part of [DiskWranglerCore](https://github.com/drdpj/DiskWranglerCore) and covers
+[Acorn Disk Wrangler](https://github.com/drdpj/AcornDiskWrangler),
+[CP/M Disk Wrangler](https://github.com/drdpj/CPMDiskWrangler) and
+[FLEX Disk Wrangler](https://github.com/drdpj/FLEXDiskWrangler). Below, `<app>` is `acorndiskwrangler`,
+`cpmdiskwrangler` or `flexdiskwrangler`.
 
 ## What it needs
 The programs share DiskWranglerCore, which each has as a git submodule in its `core/` folder. Clone with it:
@@ -18,7 +19,7 @@ instead. qmake and CMake stop with a message when `core/` is empty.
 Qt 6 (or Qt 5.15) with its widgets module, and a C++17 compiler. qmake builds with whichever Qt its `qmake`
 belongs to; CMake uses Qt 6 if it finds it, and `-DUSE_QT5=ON` makes it use Qt 5.
 
-    qmake <app>.pro && make                         # or: cmake -S . -B build && cmake --build build
+    qmake <app>.pro && make -j$(nproc)              # or: cmake -S . -B build && cmake --build build -j$(nproc)
 
 The version shown in Help > About is `git describe --tags --always --dirty`, taken when qmake or CMake runs (re-run
 it after a new commit or tag). Without git history, as in a source zip, it is "unknown" unless you give it:
@@ -76,11 +77,11 @@ With Qt's official Qt 6 (the [online installer](https://www.qt.io/download-qt-in
 For Qt 5, use Homebrew's `qt@5` (Apple Silicon only, and Homebrew drops it in May 2027) and `QT=5`.
 
 ## The console programs
-Each program has a console program beside it, built from the same code: `acorndw` (`acorndw.pro`) and `cpmdw`
-(`cpmdw.pro`). They need only QtCore, so they run without a display. Build one like the program, from its own
+Each program has a console program beside it, built from the same code: `acorndw` (`acorndw.pro`), `cpmdw`
+(`cpmdw.pro`) and `flexdw` (`flexdw.pro`). They need only QtCore, so they run without a display. Build one like the program, from its own
 `.pro`, in a folder of its own:
 
-    mkdir build-cli && cd build-cli && qmake6 ../acorndw.pro && make     # CMake builds it with the program
+    mkdir build-cli && cd build-cli && qmake6 ../acorndw.pro && make -j$(nproc)    # CMake builds it with the program
 
 `make install` (or `cmake --install`) puts it in `bin/` beside the program (CMake on macOS: inside the program's bundle). What the commands do is in
 [cli.md](cli.md).

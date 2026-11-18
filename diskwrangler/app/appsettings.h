@@ -19,7 +19,7 @@
 
 // Where the program keeps its settings. Normally the system's own place (the registry on Windows, a plist in
 // ~/Library/Preferences on macOS, ~/.config/<program>/<program>.conf elsewhere). Portable mode: if a file
-// <program>.ini (acorndiskwrangler.ini, cpmdiskwrangler.ini) sits in the program's folder - beside the .exe, or
+// <program>.ini (acorndiskwrangler.ini, cpmdiskwrangler.ini, flexdiskwrangler.ini) sits in the program's folder - beside the .exe, or
 // beside the .app bundle on macOS - the settings are kept in that file instead, so the program can be carried on
 // a USB stick with them. An empty file is enough to switch it on. (On a read-only medium the settings are read
 // but not saved.) An AppImage runs from a temporary mount, so its folder is the one holding the .AppImage file

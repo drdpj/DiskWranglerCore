@@ -332,6 +332,20 @@ change, to the second (UniFLEX keeps seconds since 1980 in GMT). The data is the
 blocks UniFLEX never wrote come out as zeros. Text files keep UniFLEX's CR line ends and their TABs. A directory
 travels as a directory with its contents. A device file travels as an empty file (its device numbers don't travel).
 
+### `uef` - a tape's chunks as they are (produced by Acorn Disk Wrangler)
+
+For what a tape holds that a file's attributes can't carry: data the cassette filing system can't read (a game's own
+loader format) and files with errors (a bad CRC, a missing block). A receiver that writes tapes adds the chunks to its
+tape as they are, so the copy is the same, errors and all; any other receiver ignores the namespace and takes the
+item's data as a file (with its `acorn` attributes, if it has them).
+
+| Key | Meaning |
+|---|---|
+| `chunks` | string, base64: UEF chunk records (a 16-bit id and a 32-bit length, little-endian, then the body), with the base frequency (`&0113`) and baud rate (`&0117`) they were played at in front when those aren't the defaults |
+
+The item's data is still the bytes the program reads from the chunks (unrecognised data: the bytes no block took; a
+damaged file: what of it could be read).
+
 New namespaces should be short, lower-case and named after the filesystem or machine family. Please add them
 here.
 
@@ -350,6 +364,8 @@ here.
   filesystem it doesn't know (e.g. `cpm`) are treated like files dropped from the host. Dates are not applied
   (new files get the current time, as for any other copy).
 * Otherwise, plain files: imported as files from the host, reading `.inf` sidecars if that option is on.
+* On a tape: an item with `uef` chunks goes on the end of the tape as those chunks are; any other file is saved as
+  the BBC Micro's `*SAVE` saves it.
 
 ## What FLEX Disk Wrangler does with a drop
 
@@ -375,3 +391,4 @@ here.
   no change of version was needed.
 * National variants of ASCII (CP/M Disk Wrangler, 2026): `name` stays the disc's bytes; clarified above, no
   change of version was needed.
+* The `uef` namespace (Acorn Disk Wrangler's tapes, 2026); no change of version was needed.

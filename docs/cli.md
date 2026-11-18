@@ -1,6 +1,6 @@
 # The command-line programs
 
-`acorndw` (Acorn Disk Wrangler) and `cpmdw` (CP/M Disk Wrangler) are console programs built from the same code as the
+`acorndw` (Acorn Disk Wrangler), `cpmdw` (CP/M Disk Wrangler) and `flexdw` (FLEX Disk Wrangler) are console programs built from the same code as the
 graphical ones: the same detection, the same filesystem classes, the same checked save. Everything they do is the
 `dw::cli` layer of DiskWranglerCore (`diskwrangler/cli/`, QtCore only: no display is needed); the two programs differ
 only in their `Backend` (how an image is opened, how a blank one is made, how host files become items and back).
@@ -48,8 +48,8 @@ levels, and `/` is an ordinary character in an ADFS name), `A.PROG` on DFS, `/GA
 | `mv IMAGE FROM TO` | Rename, or move where the filesystem can |
 | `attr IMAGE PATH... [--set KEY=VALUE]...` | Show or change attributes |
 | `title IMAGE [TEXT]`, `boot IMAGE [OPTION]` | Show or set the disc title (label) and boot option |
-| `new FILE --format=ID [...]` | Make a blank image (`new --list` lists the formats) |
-| `convert IMAGE [OUT]` | Write the image to another container, or change its side order in place |
+| `new FILE --format=ID [...]` | Make a blank image (`new --list` lists the formats; `--track0=own\|padded`, for a tool that lists it, keeps a single-density track 0 at its own size or pads it to a full track) |
+| `convert IMAGE [OUT]` | Write the image to another container, or change its side order in place (`--track0` as for `new`) |
 | `copy SRC DEST PATH...` | Copy between images (or inside one), mapping names like drag and drop |
 | `script IMAGE [FILE]` | Run many commands on one image with one save; `-` or no file reads stdin |
 

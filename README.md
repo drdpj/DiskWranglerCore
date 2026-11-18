@@ -1,7 +1,8 @@
 # DiskWranglerCore
 
-The code shared by the Disk Wrangler programs, [Acorn Disk Wrangler](https://github.com/drdpj/AcornDiskWrangler)
-and [CP/M Disk Wrangler](https://github.com/drdpj/CPMDiskWrangler): one copy instead of two that have to be kept
+The code shared by the Disk Wrangler programs, [Acorn Disk Wrangler](https://github.com/drdpj/AcornDiskWrangler),
+[CP/M Disk Wrangler](https://github.com/drdpj/CPMDiskWrangler) and
+[FLEX Disk Wrangler](https://github.com/drdpj/FLEXDiskWrangler): one copy instead of three that have to be kept
 in step by hand. Qt 6, with Qt 5.15 still supported. GPL v3 or later, like the programs.
 
 Version 0.1 held what both programs already had in identical copies: the settings helper, the button bar, the
@@ -24,7 +25,13 @@ new-disc presets registry. Version 0.14 ports the programs' tests to that API an
 moves the rest of the window code both programs wrote alike into the kit (Copy and Paste, the sorting of drops, new
 windows, the start-up in `main()`), keeps a DFS disc's title byte for byte, and settles the interfaces: from 1.0 a new
 major version means an interface break. Version 1.1 makes dragging files out work on Linux under X11 and XWayland
-(GNOME's Files, terminals) and has the window say whether anything was copied (`VolumePane::execDragOut`). The design, and
+(GNOME's Files, terminals) and has the window say whether anything was copied (`VolumePane::execDragOut`); 1.1.1 adds FLEX Disk Wrangler's
+installer id. Version 1.2 lets a disc give cylinder 0 a shape of its own (`setOwnTrack0`: a single-density track 0
+on a double-density disc), and 1.3 gives `new` and `convert` the `--track0=own|padded` option for a program that
+lists it. Version 1.4 adds the tape layer (`diskwrangler/tape/`: UEF, TZX / CDT and TAP files, their chunks kept
+exactly, read as tones, gaps and data, and encoders to write them), lets a `Disc` stage its changes in a tape instead
+of a container, gives entries a `label` beside their unique name, and makes `rm` remove an ordered volume's entries
+last first. The design, and
 how each version changed it, is in [docs/design.md](docs/design.md).
 
 **Writing a program on the core:** [docs/guide.md](docs/guide.md) shows how the pieces fit and what a program
@@ -34,7 +41,7 @@ writes itself.
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.1.0
+    git -C core checkout v1.4.0
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you
@@ -54,10 +61,12 @@ that needs only the device layer (QtCore) can include `core/diskwrangler-device.
 the filesystem layer alone is `core/diskwrangler-fs.pri` / `DiskWrangler::Fs`; the transfer items and retro-files
 are `core/diskwrangler-xfer.pri` / `DiskWrangler::Xfer`. The filesystem modules are optional:
 a program takes the ones it registers, `core/diskwrangler-dfs.pri` / `DiskWrangler::Dfs` and
-`core/diskwrangler-fat.pri` / `DiskWrangler::Fat` (each `.pri` brings what it stands on, and adds it only once).
+`core/diskwrangler-fat.pri` / `DiskWrangler::Fat`, and a program whose machine saved to cassette takes the tape
+layer, `core/diskwrangler-tape.pri` / `DiskWrangler::Tape` (each `.pri` brings what it stands on, and adds it only
+once).
 
 A program's console program (QtCore only, no display needed) has its own `.pro` beside the program's, named to end
-in `dw.pro` (`acorndw.pro`, `cpmdw.pro`), with `QT = core` and `CONFIG += console`, including
+in `dw.pro` (`acorndw.pro`, `cpmdw.pro`, `flexdw.pro`), with `QT = core` and `CONFIG += console`, including
 `core/diskwrangler-cli.pri` and the filesystem modules it registers; in CMake it links `DiskWrangler::Cli` and
 `Qt::Core` only. It supplies a `dw::cli::Backend` (how an image is opened, how a blank one is made, how host files
 become items and back) and its `main` calls `dw::runCli`; [docs/cli.md](docs/cli.md) describes the commands and how
@@ -73,13 +82,16 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 | `diskwrangler/text/` | the file-viewer registry with the Plain and Hex viewers, and the text helpers (QtCore only) |
 | `diskwrangler/device/` | `Container` (the image file: raw, ImageDisk, DSK / extended DSK, TeleDisk; physical and stored-bytes views; staging; `commit` and `saveAs`), `Linear` (a disc as one run of bytes, through a `SideOrder`), `SafeSave` (temporary copy, check, `.bak`, atomic replace) (QtCore only) |
 | `diskwrangler/fs/` | `Volume`, `Path`, `Entry`, `AttrSpec`, `NameRules` (`volume.h`), `Disc` with its mounts, transactions and checked save (`disc.h`), detection by tiers: `Probe`, `Candidate`, `decide` (`detection.h`), the new-disc presets registry (`presets.h`) (QtCore only) |
+| `diskwrangler/tape/` | tape images: `TapeFile` (UEF, gzip or not, TZX / CDT, TAP; its chunks kept exactly, changes staged, the checked save), `pieces()` (the chunks read as tones, gaps and data with their codings, `chunkOf` for where a byte came from), and the encoders that make chunks (`records.h`) (QtCore only) |
 | `diskwrangler/fs/dfs/`, `fs/fat/` | the optional modules: Acorn DFS (Watford 62-file catalogues, `.inf` lines, addresses, directory letters copied to ADFS, Acorn Z80 CP/M's catalogue) and FAT12/16, each with its probe and its `Volume` adapter (QtCore only) |
 | `diskwrangler/cli/` | the command-line layer: `Backend`, `OpenedImage` and `runCli` (`cli.h`), the argument and script parser, the JSON output and exit codes, and the commands (QtCore only) |
 | `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
 | `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) |
 | `docs/` | the guide to writing a program on the core (`guide.md`); the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
-| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit and its import session on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
+| `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit and its import session on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax), `importtest` (the `Importer`), `tapetest` (the tape
+layer; `tape_check.py` reads the same tapes independently) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
 
 ## Versions
-Semantic-version tags. `v0.x` until the filesystem interface settles; a program pins one tag through its submodule,
-and a major-version change means an interface break.
+Semantic-version tags; a program pins one tag through its submodule. Since 1.0.0 the interfaces are settled: a new
+major version means an interface break, a minor one adds something, a patch fixes. `DW_CORE_VERSION` (`cli/cli.h`)
+is raised with every tag.

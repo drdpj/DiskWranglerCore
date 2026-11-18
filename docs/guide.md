@@ -1,8 +1,8 @@
 # Building a program on DiskWranglerCore
 
 This is the guide for writing a Disk Wrangler: a program that opens disc images of some old machine, shows their
-files, and copies files in and out. Acorn Disk Wrangler and CP/M Disk Wrangler are built this way, and they are the
-worked examples throughout. The reference for each class is its header (every header starts with a comment saying
+files, and copies files in and out. Acorn Disk Wrangler, CP/M Disk Wrangler and FLEX Disk Wrangler are built this way,
+and they are the worked examples throughout. The reference for each class is its header (every header starts with a comment saying
 what it is for); [design.md](design.md) says why things are as they are, and [cli.md](cli.md) describes the console
 programs' commands. This guide says how the pieces fit and which ones a new program writes.
 
@@ -46,7 +46,7 @@ with `ldd`. Never include a `ui/` header from a class the console program uses.
 The core is a git submodule at `core/`, pinned to a tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.1.0
+    git -C core checkout v1.4.0
     git add core .gitmodules
 
 qmake compiles the core's sources into the program. The window's `.pro`:
@@ -269,7 +269,7 @@ and gaps), blocks, files, and the data nothing could read as rows of their own.
 
 ## The console program
 
-A few lines (`src/cli/main.cpp` in either program): fill a `dw::cli::AppInfo` (the tool's name, the program's
+A few lines (`src/cli/main.cpp` in each program): fill a `dw::cli::AppInfo` (the tool's name, the program's
 `app::AppInfo`, the extra options the tool has) with a `Backend`, and return `dw::runCli(argc, argv, info)`. The
 `Backend` (`cli/cli.h`) is what differs between programs: `open` (detection, then the document as an `OpenedImage`;
 `resolveVerdict` does the `--fs` choice), `create` (a new disc from a preset), `formats` (`new --list`),
@@ -279,8 +279,9 @@ A few lines (`src/cli/main.cpp` in either program): fill a `dw::cli::AppInfo` (t
 ## Other programs of the family
 
 `AppInfo::handsTo` lists the programs this one hands discs to, each an `fs::OtherApp` (id, name, Windows folder,
-releases page; `fs::acornDiskWrangler()` and `fs::cpmDiskWrangler()` are the existing two: add a function beside
-them for a new program, so every program can name it). A probe that recognises another program's disc sets
+releases page; `fs::acornDiskWrangler()` and `fs::cpmDiskWrangler()` are the ones there so far: add a function
+beside them for a new program, so every program can name it; FLEX Disk Wrangler has none yet, as no other program
+hands it discs). A probe that recognises another program's disc sets
 `Candidate::owner`; the kit then finds that program (`app/handoff.h`: a stored `otherApps/<id>` setting, the same
 folder, the system's records), starts it with the image, and says so, with Locate... when it can't be found.
 
