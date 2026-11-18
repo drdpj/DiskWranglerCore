@@ -940,3 +940,7 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    `Piece::chunkOf(byte)` (which chunk each byte of a data run came from, so a program can say which chunks a file
    is: a run may span several data chunks), and the text `ls` shows a labelled entry by its label (the owner's
    answer: `ls` shows bare names; `clitest`'s order check moved to the JSON, where the names differ).
+   Added while its `cfs-2` wrote tapes (branch `tape-2`, still v1.4.0): `rm` on an ordered volume removes the last
+   entry first, since a tape's unique names follow its order (removing the first `GAME` makes `GAME (2)` the `GAME`, so
+   `rm GAME 'GAME (2)' 'GAME (3)'` in the order given removed the third file and kept the second). `clitest`'s
+   `x.seq.img` names its files by their place and checks it.

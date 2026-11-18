@@ -43,7 +43,7 @@ levels, and `/` is an ordinary character in an ADFS name), `A.PROG` on DFS, `/GA
 | `ls IMAGE [PATH] [-R] [-d]` | List a directory (`-R` the tree, `-d` the directory itself) |
 | `get IMAGE PATH... HOSTDIR` | Extract; the last argument is the host folder (`-` writes one file to stdout) |
 | `put IMAGE HOST... DIR` | Import host files and folders into DIR |
-| `rm IMAGE PATH... [-r] [--force]` | Delete (`-r` for directories, `--force` for locked files) |
+| `rm IMAGE PATH... [-r] [--force]` | Delete (`-r` for directories, `--force` for locked files; on a volume whose order means something, a tape, the last first) |
 | `mkdir IMAGE PATH... [-p]` | Make directories (`-p`: and the ones above) |
 | `mv IMAGE FROM TO` | Rename, or move where the filesystem can |
 | `attr IMAGE PATH... [--set KEY=VALUE]...` | Show or change attributes |

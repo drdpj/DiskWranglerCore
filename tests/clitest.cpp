@@ -78,10 +78,36 @@ public:
     }
 };
 
+// As a tape may name its files: by their place in the list (F1, F2, F3 for A.TXT, B.TXT, C.TXT), so removing one
+// renames the ones after it.
+class SeqVolume : public fat::FsVolume {
+public:
+    using fat::FsVolume::FsVolume;
+    fs::Caps caps() const override { fs::Caps c = fat::FsVolume::caps(); c.ordered = true; return c; }
+    bool list(const fs::Path &dir, QVector<fs::Entry> *out, QString *err) const override {
+        if (!fat::FsVolume::list(dir, out, err)) return false;
+        std::sort(out->begin(), out->end(), [](const fs::Entry &a, const fs::Entry &b) { return a.name < b.name; });
+        for (int i = 0; i < out->size(); ++i) (*out)[i].name = QString("F%1").arg(i + 1);
+        return true;
+    }
+    bool stat(const fs::Path &p, fs::Entry *e, QString *err) const override { return fs::Volume::stat(p, e, err); }
+    bool read(const fs::Path &p, QByteArray *out, QString *err) const override { return fat::FsVolume::read(real(p), out, err); }
+    bool remove(const fs::Path &p, QString *err) override { return fat::FsVolume::remove(real(p), err); }
+private:
+    fs::Path real(const fs::Path &p) const {
+        QVector<fs::Entry> l;
+        QString e;
+        fat::FsVolume::list(fs::Path(), &l, &e);
+        std::sort(l.begin(), l.end(), [](const fs::Entry &a, const fs::Entry &b) { return a.name < b.name; });
+        const int i = p.name().mid(1).toInt() - 1;
+        return i >= 0 && i < l.size() ? fs::Path({l[i].name}) : p;
+    }
+};
+
 // The image's behaviour is chosen by the second suffix of its file name: x.odd.img, x.ro.img (the mount is read-only),
-// x.whole.img (the whole image is, with a reason that says what to do), x.sdet.img / x.sasm.img / x.sfor.img (a
-// double-sided disc whose side order was detected, assumed or forced) and x.cpm.img (the app() cpmdw gives for a
-// layout that is not in the library).
+// x.label.img and x.seq.img (a tape's ways: labels; names that follow the order), x.whole.img (the whole image is,
+// with a reason that says what to do), x.sdet.img / x.sasm.img / x.sfor.img (a double-sided disc whose side order was
+// detected, assumed or forced) and x.cpm.img (the app() cpmdw gives for a layout that is not in the library).
 class TestImage : public cli::OpenedImage {
 public:
     QString mode;
@@ -97,7 +123,8 @@ public:
         if (!fv->attach(lin.get(), 0, quint32(c.rawFileSize()), err)) return false;
         d.setContainer(&c);
         std::shared_ptr<fs::Volume> vol = mode == "recsize" ? std::make_shared<PlainSizeVolume>(fv) : mode == "odd" ? std::make_shared<OddVolume>(fv)
-                                        : mode == "label" ? std::make_shared<LabelVolume>(fv) : std::make_shared<fat::FsVolume>(fv);
+                                        : mode == "label" ? std::make_shared<LabelVolume>(fv) : mode == "seq" ? std::make_shared<SeqVolume>(fv)
+                                        : std::make_shared<fat::FsVolume>(fv);
         const bool ro = mode == "ro" || mode == "whole" || mode == "cpm";
         d.addMount({"DOS", vol, ro, mode == "ro" ? QString("reason of the volume") : ro ? readOnlyWhy() : QString()});
         return true;
@@ -427,6 +454,16 @@ int main(int argc, char **argv) {
         QStringList got = QDir(out).entryList(QDir::Files, QDir::Name);
         CHECK(r.exit == 0 && got == QStringList({"A.TXT", "B.TXT", "C.TXT"}) && slurp(out + "/B.TXT") == "bbb",
               "get: three files called SAME arrive under their own names: " + got.join(","));
+        // names that follow the order: rm F1 F3 removes the first and the third, last first (F3 then F1), so the
+        // second file is the one left; in the order given, removing F1 would make the third F2 and F3 nothing
+        const QString q = d + "/x.seq.img";
+        dwcli({"new", q, "--format=pc720"});
+        dwcli({"put", q, d + "/l/a.txt", d + "/l/b.txt", d + "/l/c.txt", "/"});
+        r = dwcli({"--json", "rm", q, "F1", "F3", "F1"});
+        Run g = dwcli({"get", q, "F1", "-"});
+        CHECK(r.exit == 0 && r.json["result"].toObject()["removed"].toInt() == 2 && g.out == "bbb",
+              QString("rm on an ordered volume: last first (removed %1, left \"%2\")").arg(r.json["result"].toObject()["removed"].toInt())
+                  .arg(QString::fromLatin1(g.out)));
     }
 
     printf("text output: info\n");

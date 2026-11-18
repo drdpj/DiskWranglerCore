@@ -261,7 +261,8 @@ encoders in `records.h` make chunks back. The program writes only its machine's 
 (Acorn's cassette filing system blocks, the Spectrum's header and data blocks), as a `Volume` over a `Disc` whose
 staging is the tape (`Disc::setStaged`; `Disc::commitWith` saves it after the volumes' checks). A tape's files may
 share names: give each a unique `Entry::name` and the shared one as its `label`; set `Caps::ordered` so the list
-keeps the tape's order. A data piece may span several chunks: `Piece::chunkOf(i)` says which one byte i came from (the
+keeps the tape's order (and `rm` removes the last first: a name such as `GAME (2)` may follow the order, so removing
+one must not rename one still to be removed; a window's Delete should do the same). A data piece may span several chunks: `Piece::chunkOf(i)` says which one byte i came from (the
 chunks a file occupies are what a program replaces to change it). Acorn Disk Wrangler's `src/cfs.cpp` and
 `src/cfsvolume.cpp` are the worked example: bytes as the machine's hardware hands them over (its framing only, carrier
 and gaps), blocks, files, and the data nothing could read as rows of their own.

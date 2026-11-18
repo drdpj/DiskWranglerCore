@@ -27,6 +27,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QHash>
 #include <QSet>
 #include <QUuid>
 #include <algorithm>
@@ -913,6 +914,27 @@ bool cmdRm(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
     if (!resolveVol(c, c.img.get(), p.value("vol", c.g.vol), true, &r)) return false;
     QVector<Path> nodes;
     for (const QString &t : pos) if (!expandPaths(c, r, t, &nodes)) return false;
+    // A volume whose order means something (a tape) may name its entries by it (the second GAME is "GAME (2)" only while
+    // the first is there): its entries go last first, so removing one never renames one still to be removed.
+    if (r.v->caps().ordered) {
+        QHash<QString, int> at;
+        QSet<QString> listed;
+        for (const Path &n : nodes) {
+            const QString dir = n.parent().toString(QChar(0));
+            if (listed.contains(dir)) continue;
+            listed.insert(dir);
+            QVector<fs::Entry> l;
+            QString why;
+            if (!r.v->list(n.parent(), &l, &why)) continue;
+            for (int i = 0; i < l.size(); ++i) at.insert(n.parent().child(l[i].name).toString(QChar(0)), i);
+        }
+        QVector<Path> once;
+        for (const Path &n : nodes) if (!once.contains(n)) once << n;
+        std::stable_sort(once.begin(), once.end(), [&](const Path &a, const Path &b) {
+            return at.value(a.toString(QChar(0)), -1) > at.value(b.toString(QChar(0)), -1);
+        });
+        nodes = once;
+    }
     int removed = 0;
     for (const Path &n : nodes) {
         fs::Entry e;
