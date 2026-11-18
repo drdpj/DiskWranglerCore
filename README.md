@@ -31,7 +31,7 @@ on a double-density disc), and 1.3 gives `new` and `convert` the `--track0=own|p
 lists it. Version 1.4 adds the tape layer (`diskwrangler/tape/`: UEF, TZX / CDT and TAP files, their chunks kept
 exactly, read as tones, gaps and data, and encoders to write them), lets a `Disc` stage its changes in a tape instead
 of a container, gives entries a `label` beside their unique name, and makes `rm` remove an ordered volume's entries
-last first. The design, and
+last first; 1.4.1 brings these documents up to date and adds the retro-files `uef` namespace. The design, and
 how each version changed it, is in [docs/design.md](docs/design.md).
 
 **Writing a program on the core:** [docs/guide.md](docs/guide.md) shows how the pieces fit and what a program
@@ -41,7 +41,7 @@ writes itself.
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.4.0
+    git -C core checkout v1.4.1
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you

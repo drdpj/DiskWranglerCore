@@ -944,3 +944,9 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    entry first, since a tape's unique names follow its order (removing the first `GAME` makes `GAME (2)` the `GAME`, so
    `rm GAME 'GAME (2)' 'GAME (3)'` in the order given removed the third file and kept the second). `clitest`'s
    `x.seq.img` names its files by their place and checks it.
+6. **The documents brought up to date (core v1.4.1).** The README, this guide's companions (`guide.md`,
+   `building.md`, `cli.md`) and the README's layout table had stayed as they were at 1.1: they now name the three
+   programs and `flexdw`, the versions to 1.4, the tape layer, `tapetest` and `importtest`, and `--track0`.
+   `retro-files-format.md` gains the `uef` namespace: Acorn Disk Wrangler's tapes carry the chunks of unrecognised
+   data and damaged files with them, so another tape can keep them exactly (any other receiver takes the bytes). No
+   code changes; `DW_CORE_VERSION` is 1.4.1.
