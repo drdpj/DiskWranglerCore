@@ -1,11 +1,13 @@
 # Building for 32-bit Windows (Windows 7 and later)
 
-These steps build Acorn Disk Wrangler and CP/M Disk Wrangler as 32-bit Windows programs that run on Windows 7 SP1
+These steps build Acorn Disk Wrangler, CP/M Disk Wrangler and FLEX Disk Wrangler as 32-bit Windows programs that run on Windows 7 SP1
 and later, with Qt 5.15.2 and MinGW 8.1. You build on a Windows 10 or 11 PC and copy the result to the older
 machine. The official releases are 64-bit only (see [building.md](building.md)), so this is the route for older
 or 32-bit PCs. **This toolchain has not been tried with these programs yet: please report how it goes.**
 
-(This file is the same in both repositories.)
+(This file is in DiskWranglerCore, the `core/` submodule of all three programs. Build only the ones you want: each
+step below is the same for each program. The console programs `acorndw`, `cpmdw` and `flexdw` build the same way
+from their own `.pro` files, `acorndw.pro`, `cpmdw.pro` and `flexdw.pro`, each in a build folder of its own.)
 
 ## What you need
 * **A Windows 10 or 11 PC** to build on (64-bit is fine; the result is still 32-bit). Building on Windows 7
@@ -49,10 +51,12 @@ The Qt build and the compiler must match: both 32-bit, both MinGW 8.1. Do not mi
    cd C:\src
    git clone --recurse-submodules https://github.com/drdpj/AcornDiskWrangler.git
    git clone --recurse-submodules https://github.com/drdpj/CPMDiskWrangler.git
+   git clone --recurse-submodules https://github.com/drdpj/FLEXDiskWrangler.git
    ```
 
-   For a particular release rather than the latest code, add `git -C AcornDiskWrangler checkout <tag>` and `git -C AcornDiskWrangler submodule update --init` (tags are
-   listed on each repository's Releases page).
+   For a particular release rather than the latest code, add `git -C AcornDiskWrangler checkout <tag>` and
+   `git -C AcornDiskWrangler submodule update --init` (likewise for the others; tags are listed on each
+   repository's Releases page).
 
 3. Build Acorn Disk Wrangler in its own build folder:
 
@@ -76,6 +80,17 @@ The Qt build and the compiler must match: both 32-bit, both MinGW 8.1. Do not mi
 
    This leaves `cpmdiskwrangler.exe` in `C:\src\build-cpm`.
 
+5. Build FLEX Disk Wrangler the same way:
+
+   ```
+   mkdir C:\src\build-flex
+   cd C:\src\build-flex
+   qmake ..\FLEXDiskWrangler\flexdiskwrangler.pro CONFIG+=release CONFIG-=debug_and_release
+   mingw32-make -j4
+   ```
+
+   This leaves `flexdiskwrangler.exe` in `C:\src\build-flex`.
+
 **Keep these build folders to this toolchain.** Don't build in a folder that another Qt or compiler has used -
 the source tree's own `build/` from `core/ci/build.sh`, say - and don't run `core/ci/build.sh` in a folder used here. make
 reuses object files it thinks are up to date, and objects from another Qt version fail to link with a long list
@@ -98,7 +113,14 @@ windeployqt --release --compiler-runtime --no-translations C:\dist\AcornDiskWran
 mkdir C:\dist\CPMDiskWrangler
 copy C:\src\build-cpm\cpmdiskwrangler.exe C:\dist\CPMDiskWrangler\
 windeployqt --release --compiler-runtime --no-translations C:\dist\CPMDiskWrangler\cpmdiskwrangler.exe
+
+mkdir C:\dist\FLEXDiskWrangler
+copy C:\src\build-flex\flexdiskwrangler.exe C:\dist\FLEXDiskWrangler\
+windeployqt --release --compiler-runtime --no-translations C:\dist\FLEXDiskWrangler\flexdiskwrangler.exe
 ```
+
+A console program goes in the same folder as its window program (`acorndw.exe` beside `acorndiskwrangler.exe`, and
+so on): it needs only Qt's core DLL and the MinGW runtime, which are already there.
 
 Each folder under `C:\dist` is now complete: copy or zip the whole folder, never the `.exe` alone. It should
 hold, among others, `Qt5Core.dll`, `Qt5Gui.dll`, `Qt5Widgets.dll`, `libgcc_s_dw2-1.dll`, `libstdc++-6.dll`,
@@ -128,8 +150,9 @@ For your own use nothing more is needed. If you give the folder to others:
 
 * Copy `LICENSE` and `THIRD-PARTY-NOTICES.md` from the program's source folder into it. Both are also built into
   the program (Help > Licences), along with Qt's LGPL.
-* Say where the source is: [AcornDiskWrangler](https://github.com/drdpj/AcornDiskWrangler) and
-  [CPMDiskWrangler](https://github.com/drdpj/CPMDiskWrangler) on GitHub. The programs are GPL v3, which requires
+* Say where the source is: [AcornDiskWrangler](https://github.com/drdpj/AcornDiskWrangler),
+  [CPMDiskWrangler](https://github.com/drdpj/CPMDiskWrangler) and
+  [FLEXDiskWrangler](https://github.com/drdpj/FLEXDiskWrangler) on GitHub. The programs are GPL v3, which requires
   that.
 * Keep Qt as separate DLLs, as `windeployqt` leaves it. The LGPL lets users replace them, so don't merge them
   into the `.exe`.

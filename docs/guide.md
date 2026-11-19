@@ -46,7 +46,7 @@ with `ldd`. Never include a `ui/` header from a class the console program uses.
 The core is a git submodule at `core/`, pinned to a tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.4.1
+    git -C core checkout v1.4.2
     git add core .gitmodules
 
 qmake compiles the core's sources into the program. The window's `.pro`:

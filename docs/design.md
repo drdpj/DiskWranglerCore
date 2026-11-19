@@ -950,3 +950,6 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    `retro-files-format.md` gains the `uef` namespace: Acorn Disk Wrangler's tapes carry the chunks of unrecognised
    data and damaged files with them, so another tape can keep them exactly (any other receiver takes the bytes). No
    code changes; `DW_CORE_VERSION` is 1.4.1.
+7. **32-bit Windows for all three (core v1.4.2).** `building-windows-32bit.md` had stayed as it was for two
+   programs: it now builds, packages and credits FLEX Disk Wrangler too, says where the console programs go, and no
+   longer calls itself a copy in each repository. No code changes; `DW_CORE_VERSION` is 1.4.2.
