@@ -134,8 +134,18 @@ bool plausibleCatalogue(const QByteArray &s0, const QByteArray &s1, quint32 *sec
     return true;
 }
 
-// The entries of one catalogue (sector 0/2 + sector 1/3).
-static QVector<File> parseEntries(const QByteArray &s0, const QByteArray &s1) {
+bool atomCatalogue(const QByteArray &s0, const QByteArray &s1) {
+    if (s0.size() < 256 || s1.size() < 256) return false;
+    const int cnt = quint8(s1[5]) / 8;
+    for (int i = 1; i <= cnt && i <= MaxFiles; ++i)
+        if ((quint8(s0[i * 8 + 7]) & 0x7F) == ' ') return true;
+    return false;
+}
+
+// The entries of one catalogue (sector 0/2 + sector 1/3). atom: as the Atom DOS keeps them - the space directory
+// shown as '$', 16-bit load and exec, the start sector's high bits in the low nibble of byte 6 and the length's in the
+// high nibble (its *INFO, &E1E3, and free-space routine, &E319).
+static QVector<File> parseEntries(const QByteArray &s0, const QByteArray &s1, bool atom = false) {
     QVector<File> out;
     int cnt = quint8(s1[5]) / 8;
     for (int i = 1; i <= cnt; ++i) {
@@ -150,24 +160,36 @@ static QVector<File> parseEntries(const QByteArray &s0, const QByteArray &s1) {
         f.exec = quint8(s1[i * 8 + 2]) | (quint32(quint8(s1[i * 8 + 3])) << 8) | (quint32((hi >> 6) & 3) << 16);
         f.length = quint8(s1[i * 8 + 4]) | (quint32(quint8(s1[i * 8 + 5])) << 8) | (quint32((hi >> 4) & 3) << 16);
         f.start = (quint32(hi & 3) << 8) | quint8(s1[i * 8 + 7]);
+        if (atom) {
+            f.load &= 0xFFFFu;
+            f.exec &= 0xFFFFu;
+            f.length = quint8(s1[i * 8 + 4]) | (quint32(quint8(s1[i * 8 + 5])) << 8) | (quint32(hi >> 4) << 16);
+            f.start = (quint32(hi & 0x0F) << 8) | quint8(s1[i * 8 + 7]);
+            if (f.dir == ' ') f.dir = '$';
+            else if (f.dir == '$') f.atomDollar = true;
+        }
         out.append(f);
     }
     return out;
 }
 
-static void putEntries(QByteArray &s0, QByteArray &s1, const QVector<File> &files) {
+static void putEntries(QByteArray &s0, QByteArray &s1, const QVector<File> &files, bool atom = false) {
     s1[5] = char(files.size() * 8);
     for (int i = 0; i < files.size(); ++i) {
         const File &f = files[i];
         int o = (i + 1) * 8;
         QByteArray nm = f.name.toLatin1().left(MaxName);
         for (int k = 0; k < 7; ++k) s0[o + k] = k < nm.size() ? nm[k] : ' ';
-        s0[o + 7] = char(f.dir.unicode() | (f.locked ? 0x80 : 0));
+        const ushort dir = atom && f.dir == '$' && !f.atomDollar ? ushort(' ') : f.dir.unicode();
+        s0[o + 7] = char(dir | (f.locked ? 0x80 : 0));
         s1[o] = char(f.load & 0xFF); s1[o + 1] = char((f.load >> 8) & 0xFF);
         s1[o + 2] = char(f.exec & 0xFF); s1[o + 3] = char((f.exec >> 8) & 0xFF);
         s1[o + 4] = char(f.length & 0xFF); s1[o + 5] = char((f.length >> 8) & 0xFF);
-        s1[o + 6] = char(((f.start >> 8) & 3) | (((f.load >> 16) & 3) << 2) | (((f.length >> 16) & 3) << 4) |
-                         (((f.exec >> 16) & 3) << 6));
+        if (atom)
+            s1[o + 6] = char(((f.start >> 8) & 0x0F) | (((f.length >> 16) & 0x0F) << 4));
+        else
+            s1[o + 6] = char(((f.start >> 8) & 3) | (((f.load >> 16) & 3) << 2) | (((f.length >> 16) & 3) << 4) |
+                             (((f.exec >> 16) & 3) << 6));
         s1[o + 7] = char(f.start & 0xFF);
     }
 }
@@ -257,14 +279,18 @@ bool Disc::load(QString *err) {
     if (!rd(0, 4, &t, err)) return false;
     QByteArray s0 = t.mid(0, 256), s1 = t.mid(256, 256), s2 = t.mid(512, 256), s3 = t.mid(768, 256);
     quint32 sec = 0;
-    m_watford = watfordCatalogue(t, &sec);
-    if (!m_watford && !plausibleCatalogue(s0, s1, &sec)) { *err = "not a valid DFS catalogue"; return false; }
+    m_watford = !m_lay.atom && watfordCatalogue(t, &sec);
+    if (!m_watford && !plausibleCatalogue(s0, s1, &sec)) {
+        *err = m_lay.atom ? "not a valid Atom DOS catalogue" : "not a valid DFS catalogue";
+        return false;
+    }
     m_sectors = sec;
     m_cycle = quint8(s1[4]);
-    m_boot = (quint8(s1[6]) >> 4) & 3;
+    m_s1b6 = quint8(s1[6]);
+    m_boot = m_lay.atom ? 0 : (quint8(s1[6]) >> 4) & 3;
     m_titleBytes = s0.left(8) + s1.left(4);
     m_title = titleText(m_titleBytes);
-    m_files = parseEntries(s0, s1);
+    m_files = parseEntries(s0, s1, m_lay.atom);
     m_guard = false;
     if (m_watford) {
         for (int i = 0; i < m_files.size(); ++i)
@@ -284,6 +310,14 @@ bool Disc::writeCatalogue(QString *err) {
     for (int i = 0; i < MaxTitle; ++i) {             // the title's bytes as read (or as setTitle made them)
         const char c = i < m_titleBytes.size() ? m_titleBytes[i] : 0;
         if (i < 8) s0[i] = c; else s1[i - 8] = c;
+    }
+    if (m_lay.atom) {
+        // The Atom DOS never counts byte 4 on (it is its *TITLE's 13th character) and keeps byte 6's high nibble
+        s1[4] = char(m_cycle);
+        s1[6] = char((m_s1b6 & 0xF0) | ((m_sectors >> 8) & 0x0F));
+        s1[7] = char(m_sectors & 0xFF);
+        putEntries(s0, s1, m_files, true);
+        return wr(0, s0 + s1, err);
     }
     m_cycle = bcdInc(m_cycle);
     s1[4] = char(m_cycle);
@@ -364,6 +398,8 @@ void Disc::placeWatford(int idx) {
     else if (n2 > MaxFiles) m_files[pick(1, false)].cat = 0;
 }
 
+// Names ignoring case, as DFS. The Atom DOS compares them byte for byte (its search, &E15D): "prog" and "PROG" are two
+// files there. This program keeps DFS's rule on both, the stricter one, so no two names differ only in case.
 int Disc::indexOf(QChar dir, const QString &name) const {
     for (int i = 0; i < m_files.size(); ++i)
         if (m_files[i].dir.toUpper() == dir.toUpper() && m_files[i].name.compare(name, Qt::CaseInsensitive) == 0) return i;
@@ -440,7 +476,7 @@ bool Disc::addInner(QChar dir, const QString &name, const QByteArray &data, quin
     QString why;
     if (!validName(name, &why)) { *err = QString("'%1': %2").arg(name, why); return false; }
     if (!validDir(dir)) { *err = QString("'%1' is not a valid DFS directory character").arg(dir); return false; }
-    if (data.size() > 0x3FFFF) { *err = "file too large for DFS"; return false; }
+    if (data.size() > 0x3FFFF) { *err = m_lay.atom ? "file too large for an Atom disc" : "file too large for DFS"; return false; }
     int idx = indexOf(dir, name);
     if (idx >= 0) {
         if (!replace) { *err = QString("'%1.%2' already exists").arg(dir, name); return false; }
@@ -468,7 +504,7 @@ bool Disc::addInner(QChar dir, const QString &name, const QByteArray &data, quin
     }
     File f;
     f.name = name; f.dir = dir; f.locked = locked;
-    f.load = load & 0x3FFFF; f.exec = exec & 0x3FFFF;
+    f.load = load & addrMask(); f.exec = exec & addrMask();
     f.length = quint32(data.size()); f.start = start;
     m_files.append(f);
     if (m_watford) placeWatford(m_files.size() - 1);
@@ -495,8 +531,9 @@ bool Disc::modify(QChar oldDir, const QString &oldName, QChar newDir, const QStr
     int clash = indexOf(newDir, newName);
     if (clash >= 0 && clash != idx) { *err = QString("'%1.%2' already exists").arg(newDir, newName); return false; }
     File &f = m_files[idx];
+    if (f.dir != newDir) f.atomDollar = false;
     f.name = newName; f.dir = newDir; f.locked = locked;
-    f.load = load & 0x3FFFF; f.exec = exec & 0x3FFFF;
+    f.load = load & addrMask(); f.exec = exec & addrMask();
     return writeCatalogue(err);
 }
 
@@ -505,13 +542,20 @@ bool Disc::setTitle(const QString &title, QString *err) {
     if (title.size() > MaxTitle) { *err = "the DFS disc title can be at most 12 characters"; return false; }
     for (QChar c : title)
         if (c.unicode() < 0x20 || c.unicode() > 0x7E) { *err = "the title may only contain printable ASCII characters"; return false; }
-    m_titleBytes = title.toLatin1().leftJustified(MaxTitle, '\0');
+    if (m_lay.atom) {
+        // the Atom DOS's *TITLE (&E578): 13 spaces (sector 1 byte 4 is the 13th), then up to 12 characters
+        m_titleBytes = title.toLatin1().leftJustified(MaxTitle, ' ');
+        m_cycle = ' ';
+    } else {
+        m_titleBytes = title.toLatin1().leftJustified(MaxTitle, '\0');
+    }
     m_title = titleText(m_titleBytes);
     return writeCatalogue(err);
 }
 
 bool Disc::setBootOption(int opt, QString *err) {
     if (!canWrite(err)) return false;
+    if (m_lay.atom) { *err = "Atom discs have no boot option"; return false; }
     if (opt < 0 || opt > 3) { *err = "the boot option must be 0 (off), 1 (*LOAD), 2 (*RUN) or 3 (*EXEC)"; return false; }
     m_boot = opt;
     return writeCatalogue(err);
@@ -544,8 +588,8 @@ Report Disc::check() {
     std::sort(ex.begin(), ex.end(), [](const Ext &a, const Ext &b) { return a.s < b.s; });
     for (int i = 1; i < ex.size(); ++i)
         if (ex[i].s < ex[i - 1].e) r.errors << QString("%1 overlaps %2").arg(ex[i].n, ex[i - 1].n);
-    r.info << QString("DFS drive %1%2%3: %4 files, %5 of %6 sectors free")
-                  .arg(m_side * 2).arg(m_title.isEmpty() ? QString() : " '" + m_title + "'")
+    r.info << QString("%1 drive %2%3%4: %5 files, %6 of %7 sectors free")
+                  .arg(m_lay.atom ? "Atom DOS" : "DFS").arg(m_side * 2).arg(m_title.isEmpty() ? QString() : " '" + m_title + "'")
                   .arg(m_watford ? QString(" (Watford 62-file catalogue)") : QString())
                   .arg(m_files.size()).arg(freeSectors()).arg(m_sectors);
     return r;
@@ -554,16 +598,20 @@ Report Disc::check() {
 // ------------------------------------------------------------------------------------------------ new discs
 
 void addPresets(fs::PresetRegistry &r) {
-    struct P { const char *id, *name; int tracks; bool ds, wat; };
+    struct P { const char *id, *name; int tracks; bool ds, wat, atom; };
     static const P list[] = {
-        {"dfs-ss40", "DFS - 100K, 40 track, single-sided (.ssd)", 40, false, false},
-        {"dfs-ss80", "DFS - 200K, 80 track, single-sided (.ssd)", 80, false, false},
-        {"dfs-ds40", "DFS - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, false},
-        {"dfs-ds80", "DFS - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, false},
-        {"wat-ss40", "Watford DFS 62-file - 100K, 40 track, single-sided (.ssd)", 40, false, true},
-        {"wat-ss80", "Watford DFS 62-file - 200K, 80 track, single-sided (.ssd)", 80, false, true},
-        {"wat-ds40", "Watford DFS 62-file - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, true},
-        {"wat-ds80", "Watford DFS 62-file - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, true},
+        {"dfs-ss40", "DFS - 100K, 40 track, single-sided (.ssd)", 40, false, false, false},
+        {"dfs-ss80", "DFS - 200K, 80 track, single-sided (.ssd)", 80, false, false, false},
+        {"dfs-ds40", "DFS - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, false, false},
+        {"dfs-ds80", "DFS - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, false, false},
+        {"wat-ss40", "Watford DFS 62-file - 100K, 40 track, single-sided (.ssd)", 40, false, true, false},
+        {"wat-ss80", "Watford DFS 62-file - 200K, 80 track, single-sided (.ssd)", 80, false, true, false},
+        {"wat-ds40", "Watford DFS 62-file - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, true, false},
+        {"wat-ds80", "Watford DFS 62-file - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, true, false},
+        {"atom-ss40", "Acorn Atom DOS - 100K, 40 track, single-sided (.ssd)", 40, false, false, true},
+        {"atom-ss80", "Acorn Atom DOS - 200K, 80 track, single-sided (.ssd)", 80, false, false, true},
+        {"atom-ds40", "Acorn Atom DOS - 2 x 100K, 40 track, double-sided (.dsd)", 40, true, false, true},
+        {"atom-ds80", "Acorn Atom DOS - 2 x 200K, 80 track, double-sided (.dsd)", 80, true, false, true},
     };
     for (const P &l : list) {
         fs::Preset p;
@@ -582,8 +630,11 @@ void addPresets(fs::PresetRegistry &r) {
         p.sideOrder = l.ds;
         p.titleWhat = "Disc title";
         p.titleMax = 12;
-        p.notes = l.wat ? "Watford DFS's 62-file catalogue: a second catalogue in sectors 2-3" : QString();
+        p.notes = l.wat ? "Watford DFS's 62-file catalogue: a second catalogue in sectors 2-3"
+                : l.atom ? "the Acorn Atom's DOS: files go in its default directory, a space; no boot option"
+                         : QString();
         p.extra["watford"] = l.wat;
+        p.extra["atom"] = l.atom;
         r.add(p);
     }
 }

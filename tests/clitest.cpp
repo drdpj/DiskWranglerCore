@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.5.0)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.6.0)"), "--version: " + QString(r.out.trimmed()));
         r = dwcli({"rm", "--help"});
         CHECK(r.exit == 0 && r.out.startsWith("usage: clitest rm IMAGE PATH...") && r.out.contains("\noptions: -r, --recursive  --force\n"),
               "rm --help lists its options: " + QString(r.out));

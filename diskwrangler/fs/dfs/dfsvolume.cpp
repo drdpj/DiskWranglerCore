@@ -59,7 +59,8 @@ QVector<fs::AttrSpec> Volume::fileAttrs() const {
     fs::AttrSpec locked;
     locked.key = "locked"; locked.label = "Locked"; locked.type = fs::AttrSpec::Bool; locked.sample = "L"; locked.letter = "L";
     fs::AttrSpec load;
-    load.key = "load"; load.label = "Load"; load.type = fs::AttrSpec::Hex; load.bits = 18; load.sample = "FF1900";
+    load.key = "load"; load.label = "Load"; load.type = fs::AttrSpec::Hex; load.bits = m_d->atom() ? 16 : 18;
+    load.sample = m_d->atom() ? "C2B2" : "FF1900";
     fs::AttrSpec exec = load;
     exec.key = "exec"; exec.label = "Exec";
     locked.retroFamily = load.retroFamily = exec.retroFamily = "acorn";
@@ -70,6 +71,7 @@ QVector<fs::AttrSpec> Volume::fileAttrs() const {
 QVector<fs::AttrSpec> Volume::volumeAttrs() const {
     fs::AttrSpec title;
     title.key = "title"; title.label = "Title"; title.type = fs::AttrSpec::Text; title.sample = "MMMMMMMMMMMM";
+    if (m_d->atom()) return {title};                    // the Atom DOS has no boot option
     fs::AttrSpec boot;
     boot.key = "boot"; boot.label = "Boot option"; boot.type = fs::AttrSpec::Choice;
     for (int i = 0; i < 4; ++i) boot.choices << bootOptionName(i);
@@ -77,6 +79,7 @@ QVector<fs::AttrSpec> Volume::volumeAttrs() const {
 }
 
 fs::AttrValues Volume::volumeValues() const {
+    if (m_d->atom()) return {{"title", m_d->title()}};
     return {{"title", m_d->title()}, {"boot", m_d->bootOption()}};
 }
 
@@ -158,7 +161,7 @@ bool Volume::write(const fs::Path &dir, const QString &full, const QByteArray &d
     QChar d;
     QString n;
     splitName(full, &d, &n);
-    return m_d->addFile(d, n, data, a.value("load").toUInt() & 0x3FFFFu, a.value("exec").toUInt() & 0x3FFFFu,
+    return m_d->addFile(d, n, data, a.value("load").toUInt() & m_d->addrMask(), a.value("exec").toUInt() & m_d->addrMask(),
                         a.value("locked").toBool(), replace, err);
 }
 
@@ -185,14 +188,14 @@ bool Volume::setAttrs(const fs::Path &node, const fs::AttrValues &a, QString *er
     if (!find(node, &i, err)) return false;
     const File f = m_d->files()[i];
     return m_d->modify(f.dir, f.name, f.dir, f.name, a.value("locked", f.locked).toBool(),
-                       a.value("load", f.load).toUInt() & 0x3FFFFu, a.value("exec", f.exec).toUInt() & 0x3FFFFu, err);
+                       a.value("load", f.load).toUInt() & m_d->addrMask(), a.value("exec", f.exec).toUInt() & m_d->addrMask(), err);
 }
 
 bool Volume::setVolumeAttrs(const fs::AttrValues &a, QString *err) {
     for (auto it = a.begin(); it != a.end(); ++it) {
         if (it.key() == "title") { if (!m_d->setTitle(it.value().toString(), err)) return false; }
         else if (it.key() == "boot") { if (!m_d->setBootOption(it.value().toInt(), err)) return false; }
-        else { *err = "DFS discs have no " + it.key(); return false; }
+        else { *err = (m_d->atom() ? "Atom discs have no " : "DFS discs have no ") + it.key(); return false; }
     }
     return true;
 }
@@ -213,7 +216,7 @@ fs::AttrValues Volume::fromRetro(const QMap<QString, QJsonObject> &families, fs:
     for (const char *k : {"load", "exec"}) {
         bool ok = false;
         const quint32 n = a.value(k).toString().toUInt(&ok, 16);
-        if (ok) v[k] = n & 0x3FFFFu;
+        if (ok) v[k] = n & m_d->addrMask();
     }
     bool locked = a.value("access").toString().contains('L');        // case-sensitive: 'l' is public
     for (auto f = families.begin(); f != families.end(); ++f)           // any family's "readonly" (fat, cpm)

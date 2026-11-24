@@ -961,3 +961,14 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
    option the program takes and no other. Its source of truth is the program's own help, so `COMMAND --help` now
    lists the command's options (`commandHelp`; before, only its usage line), and the global options line names both
    forms of `-q|--quiet` and `-h|--help`. `--help` ends by pointing at `man <tool>`. `DW_CORE_VERSION` is 1.5.0.
+9. **Acorn Atom DOS discs (core v1.6.0, series `atom`).** The owner asked for Acorn Atom discs in Acorn Disk Wrangler:
+   DFS's catalogue with a space for the default directory (the Atom's "qualifier"), sector 1 byte 4 a 13th title
+   character instead of a cycle number, no boot option, and an entry's byte 6 holding the start sector's high bits
+   (low nibble) and the length's (high nibble), load and exec being 16 bits (facts from the Atom DOS ROM, recorded in
+   Acorn Disk Wrangler's `docs/disc-formats.md`). The DFS module reads and writes it with `dfs::Layout::atom`: the
+   space is `$` above the catalogue, so paths, drags, `.inf` files and the letter rules are DFS's unchanged, and the
+   volume's `fsId` stays `"dfs"`. Its probe gives the reading `"atom"`: Likely and alone when a catalogue holds a file in
+   the space directory (no DFS writes one), Possible after `"dfs"` otherwise (a blank Atom disc can't be told from a
+   blank DFS disc), so `--fs=atom` opens one. Presets `atom-ss40` ... `atom-ds80`. The CLI's `put` takes
+   `--atominpc` for a tool that lists it (`PutOptions::atomInPc`: the host files have AtomInPC's 16-byte header; the
+   program reads it). `DW_CORE_VERSION` is 1.6.0.

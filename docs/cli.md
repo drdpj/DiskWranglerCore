@@ -63,7 +63,8 @@ levels, and `/` is an ordinary character in an ADFS name), `A.PROG` on DFS, `/GA
 
 Options of the transfer commands: `--replace` and `--skip` (what to do when a name exists: neither means exit 5),
 `--letters=dirs|flatten` (DFS items arriving on ADFS), `--force` (replace a locked or read-only file),
-`--sidecars=inf|none` (`acorndw`), `--retro=FILE` (a retro-files manifest or JSON, repeatable), `--manifest=FILE`
+`--sidecars=inf|none` (`acorndw`), `--atominpc` (`acorndw put`, core v1.6.0: every host file named is an AtomInPC file,
+its 16-byte header - load, exec, length, reserved - read off; a length of 0 is the rest of the file), `--retro=FILE` (a retro-files manifest or JSON, repeatable), `--manifest=FILE`
 (`get` writes one), `--user-folders=auto|on|off` and `--trim` (`cpmdw get`).
 
 A name that clashes within one `put` (after the program's name rules) gets `~1`, `~2`... as in the GUI; the run says so

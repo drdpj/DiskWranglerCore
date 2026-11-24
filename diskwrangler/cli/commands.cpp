@@ -87,8 +87,9 @@ QVector<CmdDef> commandTable(const AppInfo &app) {
                      {"sidecars", "user-folders", "trim"}), 2, -1};
     t << CmdDef{"put", "IMAGE HOST... DIR", "add host files and folders",
                 keep({{"sidecars", QChar(), true, false}, {"retro", QChar(), true, true}, {"replace", QChar(), false, false},
-                      {"skip", QChar(), false, false}, {"letters", QChar(), true, false}, {"force", QChar(), false, false}},
-                     {"sidecars"}), 1, -1};
+                      {"skip", QChar(), false, false}, {"letters", QChar(), true, false}, {"force", QChar(), false, false},
+                      {"atominpc", QChar(), false, false}},
+                     {"sidecars", "atominpc"}), 1, -1};
     t << CmdDef{"rm", "IMAGE PATH... [-r] [--force]", "delete files and directories",
                 {{"recursive", 'r', false, false}, {"force", QChar(), false, false}}, 1, -1};
     t << CmdDef{"mkdir", "IMAGE PATH... [-p]", "make directories", {{"parents", 'p', false, false}}, 1, -1};
@@ -866,6 +867,7 @@ bool cmdPut(Ctx &c, const Parsed &p, const QStringList &pos, Result *res) {
     PutOptions po;
     po.sidecars = p.value("sidecars", "inf");
     if (po.sidecars != "inf" && po.sidecars != "none") { c.fail(ExitUsage, "--sidecars is inf or none"); return false; }
+    po.atomInPc = p.has("atominpc");
     const QStringList hostPaths = pos.mid(0, pos.size() - 1);
     const QStringList retro = p.values("retro");
     if (hostPaths.isEmpty() && retro.isEmpty()) { c.fail(ExitUsage, "put needs host files or --retro"); return false; }

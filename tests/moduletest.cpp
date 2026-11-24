@@ -228,6 +228,86 @@ int main(int argc, char **argv) {
         CHECK(probeFile(d + "/junk.img").action == fs::Verdict::None, "junk: nothing");
     }
 
+    printf("DFS: Acorn Atom DOS discs (series atom)\n");
+    {
+        // as the Atom DOS writes them: the default directory a space, byte 4 of sector 1 not a cycle number, byte 6's
+        // high nibble kept (testdata/ATOM's sample has 0x03 there; garbage is made up here to see it kept)
+        QByteArray img(400 * 256, 0);
+        img.replace(0, 512, catalogue(400, "ATOM TEST"));
+        img[256 + 4] = 0x42;
+        img[256 + 6] = char(0x50 | 0x01);
+        img.replace(8, 8, QByteArray("BASIC  ") + ' ');           // entry 1: BASIC, directory space
+        img.replace(16, 8, QByteArray("OLD    ") + char('$' | 0x80));   // entry 2: a real '$', locked
+        img[256 + 5] = 16;
+        const unsigned char e1[8] = {0x00, 0xC0, 0xB2, 0xC2, 0x00, 0x10, 0x00, 0x12};   // C000 C2B2 1000 at 18
+        const unsigned char e2[8] = {0x00, 0x29, 0xB2, 0xC2, 0x00, 0x02, 0x00, 0x02};   // 2900 C2B2 200 at 2
+        for (int i = 0; i < 8; ++i) { img[256 + 8 + i] = char(e1[i]); img[256 + 16 + i] = char(e2[i]); }
+        spit(d + "/atom.ssd", img);
+        fs::Verdict v = probeFile(d + "/atom.ssd");
+        CHECK(v.action == fs::Verdict::Open && v.ranked.size() == 1 && v.bestCandidate()->fsId == "atom" &&
+                  v.bestCandidate()->tier == fs::Tier::Likely &&
+                  v.bestCandidate()->description == "Acorn Atom DOS single-sided 40-track (100K per side)" &&
+                  std::any_cast<dfs::Found>(v.bestCandidate()->data).layout.atom,
+              "a space directory: Atom DOS, the only reading: " + (v.bestCandidate() ? v.bestCandidate()->description : QString()));
+        CHECK(dfs::atomCatalogue(img.left(256), img.mid(256, 256)) && !dfs::atomCatalogue(catalogue(400, "X").left(256), catalogue(400, "X").mid(256)),
+              "atomCatalogue");
+        device::Container c;
+        CHECK(c.open(d + "/atom.ssd", &err), "open: " + err);
+        device::Linear lin(&c);
+        auto disc = std::make_shared<dfs::Disc>();
+        dfs::Layout lay;
+        lay.sectorsPerSide = 400;
+        lay.atom = true;
+        CHECK(disc->attach(&lin, quint64(img.size()), 0, lay, &err) && disc->atom() && disc->files().size() == 2, "attach: " + err);
+        auto vol = std::make_shared<dfs::Volume>(disc);
+        fs::Disc fd(&c);
+        fd.addMount({"drive 0", vol});
+        fs::Entry e;
+        CHECK(vol->stat(fs::Path({"BASIC"}), &e, &err) && e.name == "$.BASIC" && e.attrs["load"].toUInt() == 0xC000u && e.size == 0x1000,
+              "the space directory is $ here: " + err);
+        CHECK(vol->volumeAttrs().size() == 1 && !vol->volumeValues().contains("boot") && !vol->setVolumeAttrs({{"boot", 3}}, &err),
+              "no boot option");
+        CHECK(vol->fileAttrs()[1].bits == 16, "16-bit addresses");
+        CHECK(vol->write(fs::Path(), "NEW", QByteArray(300, 'n'), {{"load", 0xFFFF1900u}, {"exec", 0x12345u}}, QDateTime(), false, &err) &&
+                  vol->write(fs::Path(), "A.QUAL", "q", {}, QDateTime(), false, &err), "write: " + err);
+        CHECK(vol->stat(fs::Path({"NEW"}), &e, &err) && e.attrs["load"].toUInt() == 0x1900u && e.attrs["exec"].toUInt() == 0x2345u,
+              "load and exec cut to 16 bits");
+        QByteArray cat;
+        lin.read(0, 512, &cat, &err);
+        int newAt = -1, oldAt = -1, qualAt = -1;
+        for (int i = 1; i <= quint8(cat[256 + 5]) / 8; ++i) {
+            const QByteArray n = cat.mid(i * 8, 7);
+            if (n == "NEW    ") newAt = i;
+            if (n == "OLD    ") oldAt = i;
+            if (n == "QUAL   ") qualAt = i;
+        }
+        CHECK(newAt > 0 && cat[newAt * 8 + 7] == ' ' && (quint8(cat[256 + newAt * 8 + 6]) & 0xF0) == 0 && quint8(cat[256 + newAt * 8 + 6]) <= 1,
+              "a new file: directory space, entry byte 6 holds only the start sector's high bits (no load or exec bits)");
+        CHECK(oldAt > 0 && quint8(cat[oldAt * 8 + 7]) == ('$' | 0x80) && qualAt > 0 && cat[qualAt * 8 + 7] == 'A', "a real $ kept, locked; A.QUAL");
+        CHECK(quint8(cat[256 + 4]) == 0x42 && quint8(cat[256 + 6]) == 0x51 && quint8(cat[256 + 7]) == 0x90,
+              "sector 1 byte 4 not counted on, byte 6's high nibble kept");
+        CHECK(vol->setVolumeAttrs({{"title", "ATOM"}}, &err) && lin.read(0, 512, &cat, &err) && cat.left(8) == "ATOM    " &&
+                  cat.mid(256, 5) == "     " && disc->title() == "ATOM", "*TITLE: 13 bytes of spaces, then the characters");
+        {
+            dfs::Disc fresh = *disc;
+            CHECK(fresh.reload(&err) && describe(fresh) == describe(*disc), "reload is faithful");
+        }
+        CHECK(vol->check().ok() && vol->check().info.join(' ').startsWith("Atom DOS drive 0"), "check: " + vol->check().info.join(' '));
+        // a DFS catalogue with no space directory: DFS first, Atom DOS possible
+        QByteArray plain(400 * 256, 0);
+        plain.replace(0, 512, catalogue(400, "PLAIN"));
+        spit(d + "/plain.ssd", plain);
+        v = probeFile(d + "/plain.ssd");
+        CHECK(v.action == fs::Verdict::Open && v.ranked.size() == 2 && v.ranked[0].fsId == "dfs" && v.ranked[1].fsId == "atom" &&
+                  v.ranked[1].tier == fs::Tier::Possible && std::any_cast<dfs::Found>(v.ranked[1].data).layout.atom &&
+                  !std::any_cast<dfs::Found>(v.ranked[0].data).layout.atom, "an unmarked catalogue: DFS, then Atom DOS (possible)");
+        // the presets
+        fs::PresetRegistry reg;
+        dfs::addPresets(reg);
+        const fs::Preset *ap = reg.find("atom-ds40");
+        CHECK(ap && ap->extra.value("atom").toBool() && ap->doubleSided && ap->bytes == 2 * 400 * 256, "preset atom-ds40");
+    }
+
     printf("DFS: .inf files, addresses, directory letters\n");
     {
         dfs::Inf i;
@@ -533,9 +613,9 @@ int main(int argc, char **argv) {
         QStringList ids;
         for (const fs::Preset &p : r.all()) ids << p.id;
         CHECK(ids == QStringList({"dfs-ss40", "dfs-ss80", "dfs-ds40", "dfs-ds80", "wat-ss40", "wat-ss80", "wat-ds40", "wat-ds80",
-                                  "dos-800", "pc-360", "pc-720", "pc-1200", "pc-1440"}), "DFS then FAT, in order: " + ids.join(' '));
+                                  "atom-ss40", "atom-ss80", "atom-ds40", "atom-ds80", "dos-800", "pc-360", "pc-720", "pc-1200", "pc-1440"}), "DFS then FAT, in order: " + ids.join(' '));
         dfs::addPresets(r);
-        CHECK(r.all().size() == 13 && r.all()[0].id == "dfs-ss40" && r.all()[8].id == "dos-800", "adding a module's presets again changes nothing");
+        CHECK(r.all().size() == 17 && r.all()[0].id == "dfs-ss40" && r.all()[12].id == "dos-800", "adding a module's presets again changes nothing");
         const fs::Preset *p = r.find("DFS-DS80");
         CHECK(p && p->id == "dfs-ds80" && p->name == "DFS - 2 x 200K, 80 track, double-sided (.dsd)" && p->fsId == "dfs" && p->source == "dfs",
               "find ignores case; the DFS 80-track double-sided preset");
@@ -562,7 +642,7 @@ int main(int argc, char **argv) {
         own.name = "mine";
         own.source = "app";
         r.add(own);
-        CHECK(r.all().size() == 13 && r.all()[10].name == "mine" && r.fromSource("app").size() == 1, "the same id replaces in place");
+        CHECK(r.all().size() == 17 && r.all()[14].name == "mine" && r.fromSource("app").size() == 1, "the same id replaces in place");
         r.removeSource("dfs");
         CHECK(r.all().size() == 5 && !r.find("dfs-ss40") && r.find("pc-360"), "removeSource takes out one source's presets");
         CHECK(!r.find("adfs-s"), "an unknown id: null");

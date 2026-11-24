@@ -21,6 +21,8 @@
 //
 // The list is flat. A file's path is its full name, "$.BOOT" or "A.PROG": the directory letter is part of the name
 // (a name written without one goes in $). Attributes: locked, load, exec (18-bit). Volume attributes: title, boot.
+// An Acorn Atom DOS disc (Disc::atom) is the same volume, fsId "dfs" too: its default directory (a space) is '$' here,
+// load and exec are 16-bit and it has no boot option.
 
 #include <memory>
 

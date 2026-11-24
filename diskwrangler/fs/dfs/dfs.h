@@ -22,6 +22,10 @@
 // (side 0 = drive 0, side 1 = drive 2), each with its own catalogue.
 // Watford DFS's 62-file discs are handled too: a second catalogue in sectors 2-3, marked by eight &AA bytes
 // where its title would be (see Acorn Disk Wrangler's docs/disc-formats.md).
+// So are the Acorn Atom's (Atom DOS, Layout::atom): the same catalogue, with a space for the default directory (the
+// Atom's "qualifier"), 16-bit load and exec, no boot option and no cycle number (see Acorn Disk Wrangler's
+// docs/disc-formats.md, "Acorn Atom DOS"). Above the catalogue the space is shown as '$', so an Atom disc's paths,
+// drags and .inf files are a DFS disc's.
 #pragma once
 
 #include <QChar>
@@ -51,6 +55,7 @@ struct File {
     bool locked = false;
     quint32 load = 0, exec = 0, length = 0, start = 0;
     int cat = 0;             // Watford 62-file disc: 0 = first catalogue (sectors 0-1), 1 = second (sectors 2-3)
+    bool atomDollar = false; // Atom disc: the directory byte on the disc is a real '$' (dir '$' is otherwise the space)
     quint32 sectors() const { return (length + SectorSize - 1) / SectorSize; }
     QString fullName() const { return QString(dir) + "." + name; }
 };
@@ -60,6 +65,7 @@ struct Layout {
     bool doubleSided = false;
     bool interleaved = true;          // DSD: track 0 side 0, track 0 side 1, track 1 side 0 ...
     quint32 sectorsPerSide = 0;       // physical capacity of one side (tracks * 10)
+    bool atom = false;                // the Acorn Atom's DOS: read and write the catalogue as it does
 };
 
 // Boot option (*OPT 4,n) names, shared with ADFS: 0 off, 1 *LOAD !BOOT, 2 *RUN !BOOT, 3 *EXEC !BOOT.
@@ -75,6 +81,9 @@ bool plausibleCatalogue(const QByteArray &sector0, const QByteArray &sector1, qu
 // Is track0 (at least sectors 0-3 of one side) a Watford 62-file catalogue? sectors = the disc's true size (the
 // larger of the two catalogues' claims: Watford lowers the first one's, see Acorn Disk Wrangler's docs/disc-formats.md).
 bool watfordCatalogue(const QByteArray &track0, quint32 *sectors = nullptr);
+// Does a catalogue (sectors 0-1 of a side) hold a file in the Atom DOS's default directory, a space? No DFS writes one
+// (a space ends a DFS name), so such a disc is the Atom's.
+bool atomCatalogue(const QByteArray &sector0, const QByteArray &sector1);
 
 // ----- load and exec addresses
 // DFS keeps 18-bit addresses; values with bits 16 and 17 set stand for 0xFFFFxxxx (I/O processor).
@@ -96,9 +105,10 @@ bool isCpmFence(const QByteArray &first512);           // one file, $.CPMDISC
 
 // ----- new discs
 // The DFS module's presets (fs/presets.h), added to r in this order: Acorn DFS single-sided 40 and 80 tracks,
-// double-sided 40 and 80 tracks, then the same four as Watford DFS 62-file discs (extra "watford" = true). Ids
-// dfs-ss40, dfs-ss80, dfs-ds40, dfs-ds80, wat-ss40 ... wat-ds80; 10 sectors of 256 bytes a track; title "Disc title",
-// 12 characters; a double-sided disc has a side order to choose. (Moved from Acorn Disk Wrangler's NewDisc.)
+// double-sided 40 and 80 tracks, then the same four as Watford DFS 62-file discs (extra "watford" = true), then as
+// Acorn Atom DOS discs (extra "atom" = true). Ids dfs-ss40, dfs-ss80, dfs-ds40, dfs-ds80, wat-ss40 ... wat-ds80,
+// atom-ss40 ... atom-ds80; 10 sectors of 256 bytes a track; title "Disc title", 12 characters; a double-sided disc has
+// a side order to choose. (Moved from Acorn Disk Wrangler's NewDisc.)
 void addPresets(fs::PresetRegistry &r);
 
 // ----- copying DFS files to a filesystem with directories (ADFS)
@@ -137,6 +147,7 @@ public:
     QByteArray titleBytes() const { return m_titleBytes; }     // the 12 bytes as on the disc (or as setTitle made them)
     int bootOption() const { return m_boot; }
     bool watford() const { return m_watford; }          // a Watford 62-file disc (two catalogues)
+    bool atom() const { return m_lay.atom; }            // an Acorn Atom DOS disc
     int maxFiles() const { return m_watford ? MaxFilesWatford - (m_guard ? 1 : 0) : MaxFiles; }
     quint32 sectors() const { return m_sectors; }       // disc size according to the catalogue
     quint32 freeSectors() const;
@@ -154,9 +165,11 @@ public:
     bool modify(QChar oldDir, const QString &oldName, QChar newDir, const QString &newName, bool locked,
                 quint32 load, quint32 exec, QString *err);
     // A new title: the characters as given, then zeros to 12 bytes, as DFS 2.45's *TITLE (which zeroes all 12 bytes
-    // first). title() then shows it trimmed.
+    // first). On an Atom disc, spaces to 13 bytes (sector 1 byte 4 too), as the Atom DOS's *TITLE. title() then shows
+    // it trimmed.
     bool setTitle(const QString &title, QString *err);
-    bool setBootOption(int opt, QString *err);       // 0 off, 1 *LOAD, 2 *RUN, 3 *EXEC (catalogue sector 1, byte 6 bits 4-5)
+    bool setBootOption(int opt, QString *err);       // 0 off, 1 *LOAD, 2 *RUN, 3 *EXEC (catalogue sector 1, byte 6 bits 4-5); none on an Atom disc
+    quint32 addrMask() const { return m_lay.atom ? 0xFFFFu : 0x3FFFFu; }   // the bits a load or exec address keeps
 
     Report check();     // reads the staged state
 
@@ -180,7 +193,8 @@ private:
     QByteArray m_titleBytes;     // the title's 12 bytes (sector 0 bytes 0-7, sector 1 bytes 0-3)
     QString m_title;             // as shown (titleText of m_titleBytes)
     int m_boot = 0;
-    quint8 m_cycle = 0;
+    quint8 m_cycle = 0;          // sector 1 byte 4: DFS's cycle number; the Atom's 13th title character, kept
+    quint8 m_s1b6 = 0;           // sector 1 byte 6 as found (Atom: its high nibble is kept)
     // Watford 62-file discs
     bool m_watford = false;
     bool m_guard = false;        // the first catalogue holds Watford's "!.!!!!!!!" entry (sectors 2-3, hidden here)

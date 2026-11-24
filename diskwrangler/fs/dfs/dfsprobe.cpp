@@ -67,17 +67,47 @@ QVector<fs::Candidate> Probe::probe(const fs::ProbeContext &ctx) const {
     if (size < f.fullSize)
         f.notes << QString("the image file is %1 bytes shorter than a full disc (blank tracks were trimmed); "
                            "it will be padded with zeros when saved").arg(f.fullSize - size);
-    c.fsId = "dfs";
-    c.name = "DFS";
-    c.description = QString("DFS %1 %2-track (%3 per side)%4")
-                        .arg(dsd ? "double-sided" : "single-sided").arg(sec / 10).arg(sizeText(quint64(sec) * 256))
+    // an Atom disc: a file in its default directory on either side (side 1 where the image holds one)
+    bool atom = !watford && atomCatalogue(ctx.stored(0, 256), ctx.stored(256, 256));
+    if (!watford && !atom && dsd) {
+        // only a catalogue there (read in the wrong side order, side 1's place holds file data)
+        const qint64 s1 = f.sides.sequential ? qint64(sec) * 256 : 10 * 256;
+        const QByteArray c0 = ctx.stored(s1, 256), c1 = ctx.stored(s1 + 256, 256);
+        atom = plausibleCatalogue(c0, c1, nullptr) && atomCatalogue(c0, c1);
+    }
+    auto describe = [&](const QString &what) {
+        QString d = QString("%1 %2 %3-track (%4 per side)%5")
+                        .arg(what, dsd ? "double-sided" : "single-sided").arg(sec / 10).arg(sizeText(quint64(sec) * 256))
                         .arg(watford ? QString(", Watford 62-file catalogue") : QString());
-    if (f.sides.doubleSided() && f.sides.sequential) c.description += ", sequential sides";
-    c.tier = fs::Tier::Likely;
-    c.notes = f.notes;
-    c.evidence << (watford ? "a Watford 62-file catalogue in sectors 0-3" : "a DFS catalogue in sectors 0-1");
-    c.data = f;
-    return {c};
+        if (f.sides.doubleSided() && f.sides.sequential) d += ", sequential sides";
+        return d;
+    };
+    QVector<fs::Candidate> out;
+    if (!atom) {
+        c.fsId = "dfs";
+        c.name = "DFS";
+        c.description = describe("DFS");
+        c.tier = fs::Tier::Likely;
+        c.notes = f.notes;
+        c.evidence << (watford ? "a Watford 62-file catalogue in sectors 0-3" : "a DFS catalogue in sectors 0-1");
+        c.data = f;
+        out << c;
+    }
+    if (!watford) {
+        fs::Candidate a;
+        Found fa = f;
+        fa.atom = fa.layout.atom = true;
+        a.fsId = "atom";
+        a.name = "Atom DOS";
+        a.description = describe("Acorn Atom DOS");
+        a.tier = atom ? fs::Tier::Likely : fs::Tier::Possible;
+        a.notes = f.notes;
+        a.evidence << (atom ? "files in the Atom DOS's default directory (a space) in its catalogue in sectors 0-1"
+                            : "a DFS catalogue in sectors 0-1, which the Acorn Atom's DOS writes too");
+        a.data = fa;
+        out << a;
+    }
+    return out;
 }
 
 } // namespace dfs

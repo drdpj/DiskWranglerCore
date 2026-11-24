@@ -22,6 +22,9 @@
 //
 // Candidates:
 //  * "dfs", Likely: a plausible catalogue. data is a Found: the layout, side order and size to open it with.
+//  * "atom", the Acorn Atom's DOS (Found's layout.atom set): Likely, and the only reading, when a catalogue holds a
+//    file in the Atom's default directory (a space; atomCatalogue); otherwise Possible, after "dfs", for any catalogue
+//    but a Watford one, since an empty or unmarked Atom disc can't be told from a DFS disc (so --fs=atom opens it).
 //  * "acorn-cpm", Certain, owned by CP/M Disk Wrangler: the catalogue Acorn's Z80 CP/M writes ($.CPMDISC).
 
 #include <QStringList>
@@ -38,6 +41,7 @@ struct Found {
     device::SideOrder sides;         // a double-sided image: geometry and the side order of the FILE
     quint64 fullSize = 0;            // what the disc should be; a shorter file is padded when saved
     bool watford = false;
+    bool atom = false;               // the same as layout.atom
     QStringList notes;
 };
 

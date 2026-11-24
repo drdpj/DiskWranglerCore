@@ -41,7 +41,7 @@
 #include <diskwrangler/xfer/importer.h>
 #include <diskwrangler/xfer/retrofiles.h>
 
-#define DW_CORE_VERSION "1.5.0"      // the core tag this source is; raise it with every tag
+#define DW_CORE_VERSION "1.6.0"      // the core tag this source is; raise it with every tag
 
 namespace dw {
 namespace cli {
@@ -89,6 +89,7 @@ struct GetOptions {
 
 struct PutOptions {
     QString sidecars;                    // "inf" or "none"
+    bool atomInPc = false;               // --atominpc (acorndw): every host file has AtomInPC's 16-byte header
 };
 
 // put and copy: --replace, --skip, --force, --letters (the Importer's options, diskwrangler/xfer/importer.h)
@@ -170,7 +171,8 @@ struct AppInfo {
     Backend *backend = nullptr;
     // The options this tool has beyond the common ones: "sides", "diskdefs", "charset", "sidecars", "user-folders",
     // "trim", "title", "dosboot", "container-new", "stamps", "label", "separate-sides", "to-sides", "format-open",
-    // "track0" (new and convert: a raw image's track 0 of its own shape at its own size, or padded to a full track).
+    // "track0" (new and convert: a raw image's track 0 of its own shape at its own size, or padded to a full track),
+    // "atominpc" (put: the host files are AtomInPC files, a 16-byte header before the data).
     QStringList options;
 };
 
