@@ -244,7 +244,17 @@ int main(int argc, char **argv) {
     printf("usage, version, new\n");
     {
         Run r = dwcli({"--version"});
-        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.4.2)"), "--version: " + QString(r.out.trimmed()));
+        CHECK(r.exit == 0 && r.out.startsWith("clitest 0 (DiskWranglerCore 1.5.0)"), "--version: " + QString(r.out.trimmed()));
+        r = dwcli({"rm", "--help"});
+        CHECK(r.exit == 0 && r.out.startsWith("usage: clitest rm IMAGE PATH...") && r.out.contains("\noptions: -r, --recursive  --force\n"),
+              "rm --help lists its options: " + QString(r.out));
+        r = dwcli({"new", "--help"});       // a tool's own options only: clitest has no --stamps or --track0
+        CHECK(r.exit == 0 && r.out.contains("--container=VALUE") && r.out.contains("--list") && !r.out.contains("--stamps") &&
+              !r.out.contains("--track0"), "new --help lists only this tool's options: " + QString(r.out));
+        r = dwcli({"mv", "--help"});
+        CHECK(r.exit == 0 && !r.out.contains("options:"), "a command with no options lists none");
+        r = dwcli({"--help"});
+        CHECK(r.exit == 0 && r.out.contains("'man clitest'"), "--help points at the manual page");
         r = dwcli({});
         CHECK(r.exit == 2, "no command: exit 2");
         r = dwcli({"frobnicate", img});

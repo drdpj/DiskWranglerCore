@@ -9,8 +9,9 @@
 # (Qt 6.2) it installs on 22.04 and later and on Debian 12 and later. (Qt 6 runs programs built against an older
 # Qt 6; on Ubuntu 24.04 and Debian 13 the libraries were renamed ...t64, and those packages provide the old names.)
 # The program goes in /usr/bin, its .desktop file and icons where desktops look for them, so docks and menus show
-# its name and icon. Run from the source folder, with APP and VERSION set as the workflow sets them (QT=5 for a
-# Qt 5 build). Writes <output dir>/<APP>-<VERSION>-linux-<arch>.deb.
+# its name and icon; the console program goes in /usr/bin too, its manual page (man/<cli>.1) in /usr/share/man/man1.
+# Run from the source folder, with APP and VERSION set as the workflow sets them (QT=5 for a Qt 5 build). Writes
+# <output dir>/<APP>-<VERSION>-linux-<arch>.deb.
 set -euo pipefail
 b=$(cd "${1:?usage: make-deb.sh <build dir> <output dir>}" && pwd)
 mkdir -p "${2:?usage: make-deb.sh <build dir> <output dir>}"
@@ -38,6 +39,12 @@ cli=${CLI:-}
 if [ -n "$cli" ]; then
     make -C "$b-cli" install INSTALL_ROOT="$w/root" >/dev/null
     strip --strip-unneeded "$w/root/usr/bin/$cli"
+    # and its manual page (man/<cli>.1 in the program's repository, core v1.5.0), compressed as Debian's are
+    if [ -f "$src/man/$cli.1" ]; then
+        mkdir -p "$w/root/usr/share/man/man1"
+        gzip -9n < "$src/man/$cli.1" > "$w/root/usr/share/man/man1/$cli.1.gz"
+        chmod 644 "$w/root/usr/share/man/man1/$cli.1.gz"
+    fi
 fi
 
 # the package's copyright file, and this program's own notices

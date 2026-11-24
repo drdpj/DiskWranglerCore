@@ -46,7 +46,7 @@ with `ldd`. Never include a `ui/` header from a class the console program uses.
 The core is a git submodule at `core/`, pinned to a tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.4.2
+    git -C core checkout v1.5.0
     git add core .gitmodules
 
 qmake compiles the core's sources into the program. The window's `.pro`:
@@ -278,6 +278,11 @@ A few lines (`src/cli/main.cpp` in each program): fill a `dw::cli::AppInfo` (the
 `hostPolicy` and `readHost` (host files out and in). The commands, options, exit codes, `--json` envelope,
 `--dry-run` and `script` are the core's ([cli.md](cli.md)), so every tool behaves alike.
 
+Its manual page is `man/<tool>.1` in the program's repository, written for that program's users; the `.deb`
+installs it (`ci/make-deb.sh`). `ci/check-manpage.sh <tool> man/<tool>.1` keeps it in step with the program (every
+command a `.SS`, every option and only those; [cli.md](cli.md)): run it from `tests/run_all.sh`, and give a new
+option or command its place in each page that has it.
+
 ## Other programs of the family
 
 `AppInfo::handsTo` lists the programs this one hands discs to, each an `fs::OtherApp` (id, name, Windows folder,
@@ -293,7 +298,8 @@ folder, the system's records), starts it with the image, and says so, with Locat
   document for testing window-kit behaviour without a real filesystem.
 - Each program has `voltest` (its discs through `Volume` and `Disc`: transactions, faithful reload, the checked
   save), a GUI test on the kit, and golden-image tests of its console program (`tests/cli/run_cli.sh`: commands run
-  on fixed images with `SOURCE_DATE_EPOCH` set, outputs and image hashes compared).
+  on fixed images with `SOURCE_DATE_EPOCH` set, outputs and image hashes compared), and `ci/check-manpage.sh` on its
+  manual page.
 - Test data is made by the tests themselves, deterministically: random bytes now and then look like a disc.
 
 ## Versions and changes to the core

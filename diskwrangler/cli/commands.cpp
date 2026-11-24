@@ -1322,12 +1322,35 @@ const CmdDef *findCmd(const QVector<CmdDef> &t, const QString &n) {
     return nullptr;
 }
 
+// One option as help shows it: "-R, --recursive", "--container=VALUE", "--retro=VALUE..." (repeatable).
+QString optionText(const OptSpec &o) {
+    QString s = o.shortName.isNull() ? QString() : QString("-%1, ").arg(o.shortName);
+    s += "--" + o.name;
+    if (o.takesValue) s += "=VALUE";
+    if (o.repeat) s += "...";
+    return s;
+}
+
+// What COMMAND --help prints: the usage line, the summary, and the command's own options (the tool's, filtered),
+// which the manual pages are checked against (core/ci/check-manpage.sh).
+QString commandHelp(const AppInfo &app, const CmdDef &d) {
+    QString s = QString("usage: %1 %2 %3\n  %4\n").arg(app.tool, d.name, d.synopsis, d.summary);
+    if (!d.opts.isEmpty()) {
+        QStringList o;
+        for (const OptSpec &spec : d.opts) o << optionText(spec);
+        s += "options: " + o.join("  ") + "\n";
+    }
+    return s;
+}
+
 QString usageText(const AppInfo &app, const QVector<CmdDef> &t) {
     QString s = QString("usage: %1 [GLOBAL OPTIONS] COMMAND [OPTIONS] ARGS...\n\ncommands:\n").arg(app.tool);
     for (const CmdDef &d : t) s += QString("  %1 %2\n      %3\n").arg(d.name, d.synopsis, d.summary);
-    s += "\nglobal options: --json --dry-run --vol=NAME --fs=ID --backup -q --help --version";
+    s += "\nglobal options: --json --dry-run --vol=NAME --fs=ID --backup -q|--quiet -h|--help --version";
     for (const char *o : {"sides", "diskdefs", "charset"}) if (app.options.contains(QString::fromLatin1(o))) s += QString(" --") + o + "=...";
-    s += " -f|--format=NAME\nSee docs/cli.md in DiskWranglerCore for the full reference.\n";
+    s += " -f|--format=NAME\n";
+    s += QString("'%1 COMMAND --help' lists a command's options. The full reference: 'man %1' (the Linux .deb), or\n"
+                 "docs/cli.md in DiskWranglerCore.\n").arg(app.tool);
     return s;
 }
 
@@ -1638,7 +1661,7 @@ int runCli(int argc, char **argv, const cli::AppInfo &app) {
     if (!parseArgs(rest.mid(1), specs, &after, &perr)) return usageFail(perr, cmd, jsonWanted, QString());
     Parsed p = mergeParsed(lead, after);
     if (p.has("help")) {
-        printf("usage: %s %s %s\n  %s\n", qPrintable(app.tool), qPrintable(def->name), qPrintable(def->synopsis), qPrintable(def->summary));
+        printf("%s", qPrintable(commandHelp(app, *def)));
         return 0;
     }
     globalsFrom(p, &c.g);

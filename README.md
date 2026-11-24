@@ -32,7 +32,9 @@ lists it. Version 1.4 adds the tape layer (`diskwrangler/tape/`: UEF, TZX / CDT 
 exactly, read as tones, gaps and data, and encoders to write them), lets a `Disc` stage its changes in a tape instead
 of a container, gives entries a `label` beside their unique name, and makes `rm` remove an ordered volume's entries
 last first; 1.4.1 brings these documents up to date and adds the retro-files `uef` namespace; 1.4.2 adds FLEX Disk
-Wrangler to the 32-bit Windows building document. The design, and
+Wrangler to the 32-bit Windows building document. Version 1.5 gives each console program a manual page in the Linux
+`.deb`, checked against the program (`ci/check-manpage.sh`), and `COMMAND --help` lists the command's options. The
+design, and
 how each version changed it, is in [docs/design.md](docs/design.md).
 
 **Writing a program on the core:** [docs/guide.md](docs/guide.md) shows how the pieces fit and what a program
@@ -42,7 +44,7 @@ writes itself.
 Add it to a program as a git submodule named `core`, pinned to a version tag:
 
     git submodule add https://github.com/drdpj/DiskWranglerCore.git core
-    git -C core checkout v1.4.2
+    git -C core checkout v1.5.0
     git add core .gitmodules
 
 Clone such a program with `git clone --recurse-submodules`, or run `git submodule update --init` in a clone you
@@ -87,7 +89,7 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 | `diskwrangler/fs/dfs/`, `fs/fat/` | the optional modules: Acorn DFS (Watford 62-file catalogues, `.inf` lines, addresses, directory letters copied to ADFS, Acorn Z80 CP/M's catalogue) and FAT12/16, each with its probe and its `Volume` adapter (QtCore only) |
 | `diskwrangler/cli/` | the command-line layer: `Backend`, `OpenedImage` and `runCli` (`cli.h`), the argument and script parser, the JSON output and exit codes, and the commands (QtCore only) |
 | `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
-| `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) |
+| `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) and its manual page (`check-manpage.sh` checks the page against the program) |
 | `docs/` | the guide to writing a program on the core (`guide.md`); the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
 | `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit and its import session on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax), `importtest` (the `Importer`), `tapetest` (the tape
 layer; `tape_check.py` reads the same tapes independently) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |

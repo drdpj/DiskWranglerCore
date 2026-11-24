@@ -56,7 +56,7 @@ DiskWranglerCore/                 (new repo, tagged v0.x)
   fs/dfs/ fs/fat/             optional modules: diskwrangler-dfs.pri / DiskWrangler::Dfs, diskwrangler-fat.pri / DiskWrangler::Fat
   diskwranglercore.pri            qmake: SOURCES/HEADERS/RESOURCES, compiled into the app
   CMakeLists.txt              Qt 6: static library targets
-  ci/                         build.sh, make-deb.sh, installer.iss.in, collect-licences.sh
+  ci/                         build.sh, make-deb.sh, installer.iss.in, collect-licences.sh, check-manpage.sh
   docs/retro-files-format.md  single copy
   example/                    skeleton app + in-memory test filesystem
   tests/                      core tests, run against the skeleton
@@ -953,3 +953,11 @@ Series 6c (v1.0.0): the consolidation. Nothing a user sees changes apart from it
 7. **32-bit Windows for all three (core v1.4.2).** `building-windows-32bit.md` had stayed as it was for two
    programs: it now builds, packages and credits FLEX Disk Wrangler too, says where the console programs go, and no
    longer calls itself a copy in each repository. No code changes; `DW_CORE_VERSION` is 1.4.2.
+8. **Manual pages (core v1.5.0).** The owner asked for man pages for the console programs in the Linux releases.
+   Each program keeps its own, `man/<tool>.1` (man(7) macros, written for its users: the three differ in paths,
+   volumes, attributes and formats), and `ci/make-deb.sh` installs it gzipped in `/usr/share/man/man1`. The AppImage
+   doesn't carry it: `man` can't reach into an AppImage. To keep three hand-written pages from drifting,
+   `ci/check-manpage.sh` checks each against its program: groff without warnings, a `.SS` for every command, every
+   option the program takes and no other. Its source of truth is the program's own help, so `COMMAND --help` now
+   lists the command's options (`commandHelp`; before, only its usage line), and the global options line names both
+   forms of `-q|--quiet` and `-h|--help`. `--help` ends by pointing at `man <tool>`. `DW_CORE_VERSION` is 1.5.0.

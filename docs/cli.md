@@ -9,7 +9,15 @@ only in their `Backend` (how an image is opened, how a blank one is made, how ho
 acorndw [GLOBAL OPTIONS] COMMAND [OPTIONS] ARGS...
 ```
 
-Global options may come before or after the command word.
+Global options may come before or after the command word. `--help` lists the commands and the global options;
+`COMMAND --help` lists that command's own options (core v1.5.0), the ones this tool has.
+
+Each program has a **manual page**, `man/<tool>.1` in its repository (man(7) macros), which the Linux `.deb` installs
+as `/usr/share/man/man1/<tool>.1.gz` (core v1.5.0): `man cpmdw`. It is written for that program's users (its
+paths, volumes, attributes and formats) and is checked against the program by `ci/check-manpage.sh <tool> <page>`,
+which each program's `tests/run_all.sh` and its Linux workflow run: groff formats it without warnings, every command
+of `--help` has a `.SS` section of its own, every option the program takes (global and each command's) is in it, and
+it names no option the program doesn't take. A new option or command fails that check until the page has it.
 
 ## Global options
 
@@ -17,7 +25,7 @@ Global options may come before or after the command word.
 | --- | --- |
 | `--json` | One JSON document on stdout (below); nothing else is written there |
 | `--dry-run` | Do everything, including every check, but write nothing |
-| `--vol=NAME` | Which volume of the image (`adfs`, `drive0`, `drive1`, `dos`, `a`...). `all` for `ls` and `info` |
+| `--vol=NAME` | Which volume of the image (`adfs`, `dos`, `drive0`, `drive2` (a double-sided DFS disc's sides), `tape`, `cpm`, `side0`, `side1`, `flex`, `uniflex`...). `all` for `ls` and `info` |
 | `--fs=ID` | Read the image as this filesystem, whatever detection says (the ids `info` lists) |
 | `--backup` | Keep the old file as `NAME.bak` when saving |
 | `-q`, `--quiet` | No output on success |
@@ -64,7 +72,8 @@ in `warnings` and in `renamed`.
 `cpmdw`: a disc whose format isn't confirmed (an empty one, or one found by search) opens read-only, so every command
 that changes it, and every command on a blank disc made by `new`, needs `--format=NAME`. `new --list` gives each
 format's `id`, which is what `--format` takes. `--stamps` (no value) makes a CP/M 3 disc with time stamps, and
-`--label=TEXT` needs it. `get --user-folders=auto` makes `userN` folders only when the items come from more than one
+`--label=TEXT` needs it. `--separate-sides` makes a double-sided disc with a separate CP/M disc on each side, for a
+format that exists so (`rm-sd`, `rm-dd`, `rm-qd`: `new --list --json` says `separateSidesOk`). `get --user-folders=auto` makes `userN` folders only when the items come from more than one
 user area; `put` reads `user0`..`user15` folders as user areas.
 
 ### Text output

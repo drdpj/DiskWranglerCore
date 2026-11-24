@@ -94,9 +94,10 @@ program, builds the console program in `build-cli/`, and ships it in every packa
 | Windows `.zip` and installer | `<tool>.exe` beside the program's `.exe` (it uses the Qt DLLs already there) |
 | macOS `.dmg` | inside the bundle, `<App>.app/Contents/MacOS/<tool>`; to use it from a terminal, link it onto your `PATH`, e.g. `ln -s "/Applications/<App>.app/Contents/MacOS/acorndw" /usr/local/bin/acorndw` |
 | Linux AppImage | in the AppImage's `usr/bin`. A custom AppRun (`core/ci/AppRun.in`) starts it when the AppImage is started under the console program's name, so make a symlink: `ln -s ~/Applications/<App>.AppImage ~/.local/bin/acorndw` |
-| `.deb` | `/usr/bin/<tool>` (`core/ci/make-deb.sh` with `CLI=<tool>`) |
+| `.deb` | `/usr/bin/<tool>` (`core/ci/make-deb.sh` with `CLI=<tool>`), and its manual page (`man <tool>`; from `man/<tool>.1`) |
 
-The workflows build and run each program's golden-image tests for the console program on Linux (`tests/cli/`), and
+The workflows build and run each program's golden-image tests for the console program on Linux (`tests/cli/`),
+check its manual page against it (`core/ci/check-manpage.sh`) and that the installed `.deb` has it (`man -w`), and
 check on macOS and Windows that it starts.
 
 ## Release builds
