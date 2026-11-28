@@ -90,9 +90,26 @@ to write a `Backend`. The CI scripts find the `*dw.pro`, build it and ship it wi
 | `diskwrangler/cli/` | the command-line layer: `Backend`, `OpenedImage` and `runCli` (`cli.h`), the argument and script parser, the JSON output and exit codes, and the commands (QtCore only) |
 | `diskwrangler/app/handoff.h`, `ui/handoffdialog.h` | opening an image another program of the family owns: finding and starting it, the messages, and the question when two readings are equally likely |
 | `ci/` | the build, licence-collecting, `.deb`, Windows installer and complete-source-archive scripts the programs' workflows run as `core/ci/...`; they also build and ship each program's console program (`AppRun.in` is the AppImage's start script for it) and its manual page (`check-manpage.sh` checks the page against the program) |
+| `tools/` | stand-alone scripts for people using the programs: `fix_imd_header.py` (see Tools below) |
 | `docs/` | the guide to writing a program on the core (`guide.md`); the design and its amendments; building and releasing; the command-line programs (`cli.md`); the retro-files drag format |
 | `tests/` | `settingstest`, `xfertest` (names, retro-files round trips, policy hooks), `uitest` (helpers, viewers, the dialog, the window kit and its import session on `tests/memvolume.h`), `devicetest` (containers, staging, `Linear`, the checked save), `volumetest` (`Volume`, `Disc` transactions, detection by tiers, on a toy filesystem) `moduletest` (the DFS and FAT modules, with their path syntax), `importtest` (the `Importer`), `tapetest` (the tape
 layer; `tape_check.py` reads the same tapes independently) and `clitest` (argument and script parsing, paths, the `Importer`, the JSON encodings): `cmake -S . -B build && cmake --build build && ctest --test-dir build`, or the qmake `tests/*.pro` |
+
+## Tools
+`tools/fix_imd_header.py` (Python 3, nothing else needed) repairs ImageDisk files that other programs wrote slightly
+wrong, so that the Disk Wrangler programs recognise them:
+
+- a first line that isn't `IMD <version>: <date>` (early dumpfloppy writes `dumpfloppy 1: ...`); it becomes
+  `IMD 1.18:` with the original date, and the old line is kept in the comment;
+- empty track records with an invalid mode byte at the end of the file (HxC Floppy Emulator 2.12 writes them after the
+  last real track); they are cut off.
+
+```
+python3 tools/fix_imd_header.py --dry-run *.imd   # say what would change
+python3 tools/fix_imd_header.py broken.imd        # fix it, keeping the original as broken.imd.orig
+```
+
+It only changes a file that is otherwise whole ImageDisk, and leaves anything else alone with a message.
 
 ## Versions
 Semantic-version tags; a program pins one tag through its submodule. Since 1.0.0 the interfaces are settled: a new
